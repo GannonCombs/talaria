@@ -31,46 +31,69 @@ interface TopListing {
 }
 
 interface RightPanelProps {
-  rate: RateData | null;
+  rates: RateData[];
   prediction: FedPrediction | null;
   marketStats: MarketStats | null;
   topListings: TopListing[];
   onListingClick?: (id: number) => void;
 }
 
+const TERM_LABELS: Record<string, string> = {
+  '30yr_fixed': '30 yr',
+  '20yr_fixed': '20 yr',
+  '15yr_fixed': '15 yr',
+  '10yr_fixed': '10 yr',
+};
+
+const TERM_ORDER = ['30yr_fixed', '20yr_fixed', '15yr_fixed', '10yr_fixed'];
+
 export default function RightPanel({
-  rate,
+  rates,
   prediction,
   marketStats,
   topListings,
   onListingClick,
 }: RightPanelProps) {
+  // Best rate per term, sorted by term order
+  const bestByTerm = new Map<string, RateData>();
+  for (const r of rates) {
+    if (!bestByTerm.has(r.product) || r.rate < bestByTerm.get(r.product)!.rate) {
+      bestByTerm.set(r.product, r);
+    }
+  }
+  const sortedRates = TERM_ORDER
+    .filter((t) => bestByTerm.has(t))
+    .map((t) => bestByTerm.get(t)!);
+
   return (
     <div className="h-full overflow-y-auto border-l border-outline bg-background p-4 space-y-4">
       {/* Rate Watch */}
       <section className="bg-surface-container-low border border-outline p-4">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="section-header text-[10px] text-on-surface-variant">
-            Rate Watch
-          </h3>
-          <span className="text-[9px] font-mono text-on-surface-variant">
-            {rate?.product === '30yr_fixed' ? '↓ 0.4 (30D)' : ''}
-          </span>
-        </div>
-        <div className="font-mono text-3xl font-bold text-on-surface tracking-tighter">
-          {rate ? `${rate.rate}%` : '—'}
-        </div>
-        <div className="text-[10px] text-on-surface-variant font-mono mt-1">
-          APR: {rate ? `${rate.apr}% Fixed (Conventional)` : '—'}
-        </div>
-
-        {/* Rate bar visualization */}
-        <div className="mt-3 h-2 bg-surface-container-highest flex overflow-hidden">
-          <div
-            className="h-full bg-primary"
-            style={{ width: `${rate ? Math.min(100, (rate.rate / 8) * 100) : 0}%` }}
-          />
-        </div>
+        <h3 className="section-header text-[10px] text-on-surface-variant mb-3">
+          Rate Watch
+        </h3>
+        {sortedRates.length === 0 ? (
+          <div className="text-on-surface-variant text-xs">No rate data</div>
+        ) : (
+          <div className="space-y-2">
+            {sortedRates.map((r) => (
+              <div key={r.product} className="flex items-center justify-between">
+                <span className="text-xs text-on-surface-variant w-12">
+                  {TERM_LABELS[r.product] ?? r.product}
+                </span>
+                <div className="flex-1 mx-3 h-1 bg-surface-container-highest">
+                  <div
+                    className="h-full bg-primary"
+                    style={{ width: `${Math.min(100, (r.rate / 8) * 100)}%` }}
+                  />
+                </div>
+                <span className="font-mono text-sm font-bold text-on-surface w-16 text-right">
+                  {r.rate}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Fed Forecast */}

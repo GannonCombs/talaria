@@ -1,6 +1,7 @@
 import { getDb } from '@/lib/db';
 import type { DashboardMetrics } from '@/lib/modules';
 import { fetchFedPredictions } from './predictions';
+import { getLatestRate } from './bankrate';
 
 export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
   const db = getDb();
@@ -22,14 +23,8 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
 
   const medianPrice = statsRow?.avg_price ?? null;
 
-  // Get latest 30yr rate
-  const rateRow = db
-    .prepare(
-      `SELECT rate FROM housing_mortgage_rates
-       WHERE product = '30yr_fixed'
-       ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get() as { rate: number } | undefined;
+  // Get best 30yr rate for dashboard display
+  const bestRate = getLatestRate('30yr_fixed');
 
   // Fetch live Fed predictions (uses 15-min cache internally)
   const pred = await fetchFedPredictions();
@@ -39,7 +34,7 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     ? `$${Math.round(medianPrice / 1000)}K`
     : '$—';
 
-  const rateStr = rateRow ? `${rateRow.rate}%` : '—';
+  const rateStr = bestRate ? `${bestRate.rate}%` : '—';
 
   const cutStr = pred.cutProb > 0
     ? `${Math.round(pred.cutProb * 100)}%`
@@ -62,7 +57,7 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
       trendDirection: 'down',
     },
     secondary: [
-      { label: 'Best Rate', value: rateStr, valueColor: 'text-primary' },
+      { label: 'Best 30yr', value: rateStr, valueColor: 'text-primary' },
       { label: 'Fed Cut', value: cutStr, valueColor: 'text-secondary' },
       { label: 'Fed Hike', value: hikeStr, valueColor: 'text-tertiary' },
     ],

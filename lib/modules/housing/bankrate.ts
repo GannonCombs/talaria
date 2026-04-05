@@ -5,99 +5,111 @@ export interface MortgageRate {
   rate: number;
   apr: number;
   loanAmount: number;
+  lender: string;
+  monthlyPayment: number;
+  points: number;
   source: string;
 }
 
-const MOCK_RATES: MortgageRate[] = [
-  { product: '30yr_fixed', rate: 5.98, apr: 6.12, loanAmount: 440000, source: 'bankrate' },
-  { product: '15yr_fixed', rate: 5.25, apr: 5.41, loanAmount: 440000, source: 'bankrate' },
-  { product: '30yr_fha', rate: 5.65, apr: 6.45, loanAmount: 440000, source: 'bankrate' },
-  { product: '5yr_arm', rate: 5.45, apr: 6.08, loanAmount: 440000, source: 'bankrate' },
-];
-
-export async function fetchBankrateRates(params: {
-  homeValue: number;
+export interface BankrateParams {
+  purchasePrice: number;
   downPayment: number;
-  loanTerm: 30 | 15;
-  creditScore: 'excellent' | 'good' | 'fair';
+  creditScore: number;
   zipCode: string;
-  loanType: 'conventional' | 'fha' | 'va';
-}): Promise<MortgageRate[]> {
-  const loanAmount = params.homeValue - params.downPayment;
+}
+
+const DEFAULTS: BankrateParams = {
+  purchasePrice: 540000,
+  downPayment: 108000,
+  creditScore: 780,
+  zipCode: '78757',
+};
+
+export async function fetchBankrateRates(
+  params?: Partial<BankrateParams>
+): Promise<MortgageRate[]> {
+  const p = { ...DEFAULTS, ...params };
+  const loanAmount = p.purchasePrice - p.downPayment;
+
+  const url = new URL('https://mortgage-api.bankrate.com/rates/v4/');
+  url.searchParams.set('loanType', 'purchase');
+  url.searchParams.set('propertyValue', String(p.purchasePrice));
+  url.searchParams.set('propertyType', 'SingleFamily');
+  url.searchParams.set('propertyUse', 'PrimaryResidence');
+  url.searchParams.set('zipCode', p.zipCode);
+  url.searchParams.set('loanAmount', String(loanAmount));
+  url.searchParams.set('creditScore', String(p.creditScore));
+  url.searchParams.set('pointsRange', 'All');
+  url.searchParams.append('productFamilies[]', 'conventional');
+  url.searchParams.append('loanTerms[]', '30yr');
+  url.searchParams.append('loanTerms[]', '20yr');
+  url.searchParams.append('loanTerms[]', '15yr');
+  url.searchParams.append('loanTerms[]', '10yr');
+  url.searchParams.set('pid', 'br3');
+  url.searchParams.set('veteranStatus', 'NoMilitaryService');
+  url.searchParams.set('firstTimeHomeBuyer', 'false');
+  url.searchParams.append('displayTargets[]', 'mobileRateTable');
+  url.searchParams.append('deviceTypes[]', 'mobile');
+  url.searchParams.set('clientId', 'MortgageRateTable');
+  url.searchParams.set('includeSponsored', 'true');
+  url.searchParams.set('includeEditorial', 'true');
 
   try {
-    // Attempt to scrape Bankrate
-    const url = new URL('https://www.bankrate.com/mortgages/mortgage-rates/');
-    url.searchParams.set('loan-type', params.loanType);
-    url.searchParams.set('purchase-price', String(params.homeValue));
-    url.searchParams.set('down-payment', String(params.downPayment));
-    url.searchParams.set('credit-score', params.creditScore);
-    url.searchParams.set('zip', params.zipCode);
-    url.searchParams.set('loan-term', `${params.loanTerm}y`);
-
     const response = await fetch(url.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html',
+        Accept: 'application/json',
+        Origin: 'https://www.bankrate.com',
+        Referer: 'https://www.bankrate.com/mortgages/mortgage-rates/',
       },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (!response.ok) {
-      throw new Error(`Bankrate returned ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Bankrate API ${response.status}`);
 
-    const html = await response.text();
-    const rates = parseBankrateHtml(html, loanAmount);
+    const data = await response.json();
+    const offers = data.offers as Array<{
+      advertiser?: { name?: string };
+      product?: { term?: string; type?: string };
+      rate: number;
+      apr: number;
+      estimatedPayment: number;
+      points: number;
+    }>;
 
-    if (rates.length > 0) {
-      cacheRates(rates);
-      return rates;
-    }
+    if (!offers || offers.length === 0) throw new Error('No offers');
 
-    // Parsing failed — fall through to cached/mock
-    throw new Error('No rates parsed from Bankrate HTML');
-  } catch {
-    // Scraping failed — try cache, then mock
-    const cached = getCachedRates();
-    if (cached.length > 0) return cached;
+    const rates: MortgageRate[] = offers
+      .filter((o) => o.rate > 0)
+      .map((o) => {
+        const term = o.product?.term ?? '';
+        let product = '30yr_fixed';
+        if (term.includes('10')) product = '10yr_fixed';
+        else if (term.includes('15')) product = '15yr_fixed';
+        else if (term.includes('20')) product = '20yr_fixed';
 
-    const mock = MOCK_RATES.map((r) => ({ ...r, loanAmount }));
-    cacheRates(mock);
-    return mock;
-  }
-}
-
-function parseBankrateHtml(html: string, loanAmount: number): MortgageRate[] {
-  const rates: MortgageRate[] = [];
-
-  // Look for rate data in structured portions of the page.
-  // Bankrate embeds rate data in JSON-LD or data attributes.
-  // This parser is intentionally resilient — if the structure changes, it returns [].
-  const ratePattern = /\"rate\"\s*:\s*([\d.]+)/g;
-  const aprPattern = /\"apr\"\s*:\s*([\d.]+)/g;
-
-  const rateMatches = [...html.matchAll(ratePattern)].map((m) => parseFloat(m[1]));
-  const aprMatches = [...html.matchAll(aprPattern)].map((m) => parseFloat(m[1]));
-
-  if (rateMatches.length > 0) {
-    // Take the first reasonable rate (between 2% and 12%)
-    const validRates = rateMatches.filter((r) => r >= 2 && r <= 12);
-    const validAprs = aprMatches.filter((r) => r >= 2 && r <= 12);
-
-    if (validRates.length > 0) {
-      rates.push({
-        product: '30yr_fixed',
-        rate: validRates[0],
-        apr: validAprs[0] ?? validRates[0] + 0.15,
-        loanAmount,
-        source: 'bankrate',
+        return {
+          product,
+          rate: o.rate,
+          apr: o.apr,
+          loanAmount,
+          lender: o.advertiser?.name ?? 'Unknown',
+          monthlyPayment: o.estimatedPayment ?? 0,
+          points: o.points ?? 0,
+          source: 'bankrate',
+        };
       });
-    }
-  }
 
-  return rates;
+    rates.sort((a, b) => a.rate - b.rate);
+    cacheRates(rates);
+    return rates;
+  } catch (err) {
+    console.error('Bankrate API failed:', err);
+    return getCachedRates();
+  }
 }
+
+// ── Cache ──
 
 function cacheRates(rates: MortgageRate[]): void {
   const db = getDb();
@@ -106,8 +118,16 @@ function cacheRates(rates: MortgageRate[]): void {
      VALUES (date('now'), ?, ?, ?, ?, ?)`
   );
 
+  // Cache best rate per product only
+  const best = new Map<string, MortgageRate>();
+  for (const r of rates) {
+    if (!best.has(r.product) || r.rate < best.get(r.product)!.rate) {
+      best.set(r.product, r);
+    }
+  }
+
   const insert = db.transaction(() => {
-    for (const r of rates) {
+    for (const r of best.values()) {
       stmt.run(r.product, r.rate, r.apr, r.loanAmount, r.source);
     }
   });
@@ -122,7 +142,7 @@ function getCachedRates(): MortgageRate[] {
       `SELECT product, rate, apr, loan_amount, source
        FROM housing_mortgage_rates
        WHERE date >= date('now', '-1 day')
-       ORDER BY fetched_at DESC`
+       ORDER BY rate ASC`
     )
     .all() as Array<{
       product: string;
@@ -137,6 +157,9 @@ function getCachedRates(): MortgageRate[] {
     rate: r.rate,
     apr: r.apr,
     loanAmount: r.loan_amount,
+    lender: '',
+    monthlyPayment: 0,
+    points: 0,
     source: r.source,
   }));
 }
@@ -165,6 +188,39 @@ export function getLatestRate(product: string): MortgageRate | null {
     rate: row.rate,
     apr: row.apr,
     loanAmount: row.loan_amount,
+    lender: '',
+    monthlyPayment: 0,
+    points: 0,
+    source: row.source,
+  };
+}
+
+export function getBestRate(): MortgageRate | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT product, rate, apr, loan_amount, source
+       FROM housing_mortgage_rates
+       ORDER BY rate ASC LIMIT 1`
+    )
+    .get() as {
+      product: string;
+      rate: number;
+      apr: number;
+      loan_amount: number;
+      source: string;
+    } | undefined;
+
+  if (!row) return null;
+
+  return {
+    product: row.product,
+    rate: row.rate,
+    apr: row.apr,
+    loanAmount: row.loan_amount,
+    lender: '',
+    monthlyPayment: 0,
+    points: 0,
     source: row.source,
   };
 }

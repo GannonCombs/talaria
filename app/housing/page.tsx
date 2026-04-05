@@ -89,7 +89,7 @@ export default function HousingPage() {
   const [listings, setListings] = useState<ListingData[]>([]);
   const [weights, setWeights] = useState<ScoringWeights>(DEFAULT_WEIGHTS);
   const [filters, setFilters] = useState<Filters>({ minSqft: 0, minBeds: 0, maxDom: 0 });
-  const [rate, setRate] = useState<RateData | null>(null);
+  const [rates, setRates] = useState<RateData[]>([]);
   const [prediction, setPrediction] = useState<FedPrediction | null>(null);
   const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -137,11 +137,11 @@ export default function HousingPage() {
     }
     setListings(allListings);
 
-    // Rates
-    const rateRes = await fetch('/api/housing/rates?product=30yr_fixed');
+    // Rates — fetch all terms
+    const rateRes = await fetch('/api/housing/rates?refresh=true');
     if (rateRes.ok) {
       const r = await rateRes.json();
-      if (r) setRate(r);
+      if (Array.isArray(r)) setRates(r);
     }
 
     // Predictions
@@ -160,7 +160,8 @@ export default function HousingPage() {
   // Recompute scores when weights change
   async function recomputeScores(newWeights: ScoringWeights) {
     setWeights(newWeights);
-    const currentRate = rate?.rate ?? 5.98;
+    const best30 = rates.find((r) => r.product === '30yr_fixed');
+    const currentRate = best30?.rate ?? 5.98;
     await fetch('/api/housing/scores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -239,7 +240,7 @@ export default function HousingPage() {
       {/* Right Panel + Drawer overlay */}
       <div className="relative overflow-hidden">
         <RightPanel
-          rate={rate}
+          rates={rates}
           prediction={prediction}
           marketStats={marketStats}
           topListings={topListings}
@@ -253,7 +254,7 @@ export default function HousingPage() {
             neighborhoodScore={selectedNeighborhood}
             zipMedianPrice={selectedZipStats?.medianPrice ?? 415000}
             zipMedianDom={selectedZipStats?.medianDom ?? 28}
-            currentRate={rate?.rate ?? 5.98}
+            currentRate={rates.find((r) => r.product === '30yr_fixed')?.rate ?? 5.98}
             downPaymentPct={downPaymentPct}
             loanTermYears={loanTermYears}
             onClose={() => setSelectedListingId(null)}

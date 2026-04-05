@@ -7,12 +7,10 @@ export async function GET(request: NextRequest) {
 
   if (refresh) {
     const rates = await fetchBankrateRates({
-      homeValue: Number(params.get('homeValue')) || 550000,
-      downPayment: Number(params.get('downPayment')) || 110000,
-      loanTerm: (Number(params.get('loanTerm')) || 30) as 30 | 15,
-      creditScore: (params.get('creditScore') as 'excellent' | 'good' | 'fair') || 'excellent',
-      zipCode: params.get('zip') || '78745',
-      loanType: (params.get('loanType') as 'conventional' | 'fha' | 'va') || 'conventional',
+      purchasePrice: Number(params.get('purchasePrice')) || undefined,
+      downPayment: Number(params.get('downPayment')) || undefined,
+      creditScore: Number(params.get('creditScore')) || undefined,
+      zipCode: params.get('zipCode') || undefined,
     });
     return NextResponse.json(rates);
   }
