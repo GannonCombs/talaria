@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TALARIA | Housing Intelligence Tool</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&amp;family=JetBrains+Mono:wght@400;700&amp;family=Space+Grotesk:wght@500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed-variant": "#633f00",
+                        "on-surface": "#dfe2eb",
+                        "on-primary-fixed": "#002118",
+                        "primary-container": "#00d4aa",
+                        "background": "#10141a",
+                        "on-error-container": "#ffdad6",
+                        "tertiary-container": "#fbab29",
+                        "inverse-on-surface": "#2d3137",
+                        "on-secondary-fixed-variant": "#005317",
+                        "outline-variant": "#3b4a44",
+                        "surface-dim": "#10141a",
+                        "secondary-fixed-dim": "#67df70",
+                        "error": "#ffb4ab",
+                        "tertiary": "#ffcf91",
+                        "on-primary-fixed-variant": "#00513f",
+                        "surface-container-lowest": "#0a0e14",
+                        "surface-container-highest": "#31353c",
+                        "on-tertiary-fixed": "#291800",
+                        "outline": "#85948d",
+                        "surface-container-high": "#262a31",
+                        "on-error": "#690005",
+                        "secondary": "#67df70",
+                        "primary-fixed": "#55fcd0",
+                        "surface-tint": "#28dfb5",
+                        "on-primary-container": "#005643",
+                        "on-tertiary-container": "#694300",
+                        "surface-container-low": "#181c22",
+                        "inverse-primary": "#006b55",
+                        "on-primary": "#00382b",
+                        "on-tertiary": "#452b00",
+                        "on-secondary": "#00390d",
+                        "surface-container": "#1c2026",
+                        "primary": "#46f1c5",
+                        "tertiary-fixed-dim": "#ffb955",
+                        "on-secondary-container": "#00320a",
+                        "secondary-container": "#27a640",
+                        "tertiary-fixed": "#ffddb4",
+                        "on-background": "#dfe2eb",
+                        "on-secondary-fixed": "#002105",
+                        "surface-variant": "#31353c",
+                        "primary-fixed-dim": "#28dfb5",
+                        "surface": "#10141a",
+                        "on-surface-variant": "#bacac2",
+                        "surface-bright": "#353940",
+                        "error-container": "#93000a",
+                        "secondary-fixed": "#83fc89",
+                        "inverse-surface": "#dfe2eb"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+            font-size: 18px;
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #10141a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #30363D; }
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: #30363D;
+            height: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 4px;
+            background: #46f1c5;
+            margin-top: -5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body overflow-hidden">
+<!-- TopNavBar Execution -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-4 h-12 bg-[#10141a] border-b border-[#30363D]">
+<div class="flex items-center gap-8">
+<span class="text-lg font-bold tracking-tighter text-[#46f1c5] uppercase">TALARIA</span>
+<nav class="hidden md:flex gap-6 items-center h-full">
+<a class="text-xs font-bold tracking-widest text-[#8b949e] hover:text-white transition-colors" href="#">DASHBOARD</a>
+<a class="text-xs font-bold tracking-widest text-[#46f1c5] border-b-2 border-[#46f1c5] pb-1" href="#">ASSETS</a>
+<a class="text-xs font-bold tracking-widest text-[#8b949e] hover:text-white transition-colors" href="#">TERMINAL</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex flex-col items-end mr-4">
+<span class="font-mono text-sm text-[#46f1c5]">⟐ $12.43</span>
+<span class="font-mono text-[10px] text-secondary">$0.07 TODAY</span>
+</div>
+<button class="p-1 hover:bg-[#262a31] transition-all duration-75">
+<span class="material-symbols-outlined text-[#8b949e]">settings</span>
+</button>
+</div>
+</header>
+<!-- SideNavBar Execution (Left Sidebar/Controls) -->
+<aside class="fixed left-0 top-12 h-[calc(100vh-3rem)] w-80 flex flex-col bg-[#10141a] border-r border-[#30363D] z-40 overflow-y-auto custom-scrollbar">
+<!-- My Profile Section -->
+<div class="p-4 border-b border-[#30363D]">
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e]">MY_PROFILE</h3>
+<span class="px-2 py-0.5 bg-secondary/10 text-secondary text-[9px] font-mono border border-secondary/20">EXCELLENT</span>
+</div>
+<div class="space-y-4">
+<div>
+<label class="text-[9px] text-[#8b949e] block mb-1">LOAN_STRUCTURE</label>
+<div class="text-xs font-mono text-white">30YR FIXED_MORTGAGE</div>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">DOWN_PAYMENT</label>
+<span class="text-[10px] font-mono text-[#46f1c5]">20%</span>
+</div>
+<input class="w-full" max="100" min="0" type="range" value="20"/>
+</div>
+<div>
+<label class="text-[9px] text-[#8b949e] block mb-1">BUDGET_CEILING</label>
+<div class="text-lg font-mono text-white">$550,000.00</div>
+</div>
+</div>
+</div>
+<!-- Neighborhood Scoring -->
+<div class="p-4 border-b border-[#30363D]">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e] mb-4">NEIGHBORHOOD_SCORING</h3>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">SAFETY_CRIME</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">8.5</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="8"/>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">SCHOOL_RANKING</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">7.2</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="7"/>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">COMMUTE_JOLLYVILLE</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">15m</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="9"/>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">COMMUTE_DOWNTOWN</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">25m</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="6"/>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">WALKABILITY</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">4.0</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="4"/>
+</div>
+<div>
+<div class="flex justify-between mb-1">
+<label class="text-[9px] text-[#8b949e]">PRICE_OPTIMIZATION</label>
+<span class="text-[9px] font-mono text-[#46f1c5]">MAX</span>
+</div>
+<input class="w-full" max="10" min="0" type="range" value="10"/>
+</div>
+</div>
+</div>
+<!-- Filters -->
+<div class="p-4">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e] mb-4">GLOBAL_FILTERS</h3>
+<div class="space-y-4">
+<div class="grid grid-cols-2 gap-2">
+<div>
+<label class="text-[9px] text-[#8b949e] block mb-1">MIN_SQFT</label>
+<input class="w-full bg-[#1c2026] border-[#30363D] text-[10px] font-mono text-white px-2 py-1 focus:ring-0 focus:border-[#46f1c5]" type="text" value="1,800"/>
+</div>
+<div>
+<label class="text-[9px] text-[#8b949e] block mb-1">BEDS</label>
+<select class="w-full bg-[#1c2026] border-[#30363D] text-[10px] font-mono text-white px-2 py-1 focus:ring-0 focus:border-[#46f1c5]">
+<option>3+</option>
+<option>4+</option>
+</select>
+</div>
+</div>
+<div>
+<label class="text-[9px] text-[#8b949e] block mb-1">DAYS_ON_MARKET</label>
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-mono text-white">ANY</span>
+<input class="flex-1" max="90" min="0" type="range" value="0"/>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Map View -->
+<main class="fixed left-80 right-96 top-12 bottom-0 bg-[#0a0e14] overflow-hidden">
+<!-- Mock Map UI -->
+<div class="relative w-full h-full bg-[#10141a]">
+<img alt="Satellite view of Austin Texas urban landscape at night with glowing city lights and complex road networks" class="w-full h-full object-cover opacity-40 grayscale contrast-125" data-alt="Dark satellite map view of Austin Texas with intricate glowing blue and teal grid lines of the city infrastructure at night" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUVXVgw-XjWDTxygfPnmECk_BTZLgApra13MHdBRxOJzrFbSgViuZ3YPi2qQTnJLmC4p8tGeh2dGqA_GvjD_yESOH2UtiOZAOiEHrIpvYpTOIwx_SrTcBCEzc-WO6ycv-j1cUGFBrIzleauSbvm0hdMJvmdGGEmvLZBXQtjZ718Qe8roXCzYDvKwuSQDg0108qUd83O6MgGJiV_8H4ymo6ontTxq4cwvvOFNGN5CxRxSQMZWhj1T49OUhGzuhlkTAKDbdUU8ck5tE"/>
+<!-- Map Overlays: Isochrones (Visual placeholders) -->
+<svg class="absolute inset-0 w-full h-full pointer-events-none">
+<!-- 30m Visa Isochrone -->
+<path class="opacity-60" d="M 400 300 Q 500 200 650 350 T 800 500 T 600 650 T 350 550 Z" fill="none" stroke="#46f1c5" stroke-dasharray="4 4" stroke-width="1.5"></path>
+<!-- 30m Downtown Isochrone -->
+<path class="opacity-60" d="M 200 400 Q 350 300 550 450 T 700 650 T 500 800 T 250 700 Z" fill="none" stroke="#fbab29" stroke-dasharray="4 4" stroke-width="1.5"></path>
+<!-- Intersection Highlight -->
+<circle cx="530" cy="480" fill="#46f1c5" fill-opacity="0.05" r="100" stroke="#46f1c5" stroke-width="1"></circle>
+</svg>
+<!-- Map Markers -->
+<div class="absolute top-[40%] left-[55%] group">
+<div class="w-3 h-3 bg-secondary border border-black cursor-pointer shadow-[0_0_8px_rgba(103,223,112,0.6)]"></div>
+<div class="absolute bottom-4 left-1/2 -translate-x-1/2 hidden group-hover:block bg-surface-container-highest p-2 border border-outline-variant w-48 pointer-events-none">
+<div class="text-[9px] text-[#8b949e]">DEAL_ALERT_SCORE: 92</div>
+<div class="text-[11px] font-bold text-white">7421 OAK CLIFF DR.</div>
+<div class="text-[10px] font-mono text-[#46f1c5]">$412,000</div>
+</div>
+</div>
+<div class="absolute top-[55%] left-[42%] w-2 h-2 bg-[#46f1c5]/40 border border-black"></div>
+<div class="absolute top-[30%] left-[30%] w-2 h-2 bg-[#46f1c5]/40 border border-black"></div>
+<div class="absolute top-[65%] left-[60%] w-2 h-2 bg-[#46f1c5]/40 border border-black"></div>
+<!-- Map UI Elements -->
+<div class="absolute top-4 left-4 flex flex-col gap-2">
+<div class="bg-surface-container-highest/90 border border-outline-variant p-2 flex items-center gap-3">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 border border-[#46f1c5] border-dashed"></div>
+<span class="text-[9px] font-mono text-[#8b949e]">30M_VISA</span>
+</div>
+<div class="flex items-center gap-2 border-l border-outline-variant pl-3">
+<div class="w-2 h-2 border border-tertiary border-dashed"></div>
+<span class="text-[9px] font-mono text-[#8b949e]">30M_DOWNTOWN</span>
+</div>
+</div>
+</div>
+<div class="absolute bottom-4 right-4 flex flex-col gap-2">
+<button class="w-8 h-8 bg-surface-container-highest border border-outline-variant text-[#8b949e] hover:text-white flex items-center justify-center">+</button>
+<button class="w-8 h-8 bg-surface-container-highest border border-outline-variant text-[#8b949e] hover:text-white flex items-center justify-center">-</button>
+</div>
+</div>
+</main>
+<!-- Right Market Data Column -->
+<aside class="fixed right-0 top-12 h-[calc(100vh-3rem)] w-96 flex flex-col bg-[#10141a] border-l border-[#30363D] z-40 overflow-y-auto custom-scrollbar">
+<!-- Rate Watch -->
+<div class="p-4 border-b border-[#30363D]">
+<div class="flex justify-between items-center mb-2">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e]">RATE_WATCH</h3>
+<span class="text-[9px] font-mono text-secondary">(-0.02%)</span>
+</div>
+<div class="text-3xl font-mono text-white mb-2">5.98%</div>
+<div class="text-[9px] font-mono text-[#8b949e] mb-4">AVG 30-YR FIXED (CONVENTIONAL)</div>
+<div class="h-10 w-full flex items-end gap-[1px]">
+<div class="bg-[#30363D] flex-1 h-[60%]"></div>
+<div class="bg-[#30363D] flex-1 h-[65%]"></div>
+<div class="bg-[#30363D] flex-1 h-[55%]"></div>
+<div class="bg-[#30363D] flex-1 h-[50%]"></div>
+<div class="bg-[#30363D] flex-1 h-[45%]"></div>
+<div class="bg-secondary flex-1 h-[40%]"></div>
+<div class="bg-secondary flex-1 h-[38%]"></div>
+</div>
+</div>
+<!-- Fed Forecast -->
+<div class="p-4 border-b border-[#30363D]">
+<div class="flex justify-between items-center mb-4">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e]">FED_FORECAST</h3>
+<span class="text-[9px] font-mono text-[#8b949e]">MAY 06-07</span>
+</div>
+<div class="h-4 w-full flex mb-2">
+<div class="bg-secondary h-full" style="width: 62%;"></div>
+<div class="bg-[#30363D] h-full" style="width: 35%;"></div>
+<div class="bg-error h-full" style="width: 3%;"></div>
+</div>
+<div class="flex justify-between text-[9px] font-mono">
+<div class="flex items-center gap-1"><div class="w-1.5 h-1.5 bg-secondary"></div>CUT 62%</div>
+<div class="flex items-center gap-1"><div class="w-1.5 h-1.5 bg-[#30363D]"></div>HOLD 35%</div>
+<div class="flex items-center gap-1"><div class="w-1.5 h-1.5 bg-error"></div>HIKE 3%</div>
+</div>
+</div>
+<!-- Market Trends -->
+<div class="p-4 border-b border-[#30363D]">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e] mb-4">MARKET_TRENDS (787XX)</h3>
+<div class="grid grid-cols-2 gap-4">
+<div class="border-l border-[#30363D] pl-2">
+<label class="text-[9px] text-[#8b949e] block">MEDIAN_PRICE</label>
+<span class="text-sm font-mono text-white">$482.5K</span>
+</div>
+<div class="border-l border-[#30363D] pl-2">
+<label class="text-[9px] text-[#8b949e] block">$/SQFT</label>
+<span class="text-sm font-mono text-white">$264.12</span>
+</div>
+<div class="border-l border-[#30363D] pl-2">
+<label class="text-[9px] text-[#8b949e] block">ACTIVE_LISTINGS</label>
+<span class="text-sm font-mono text-white">412</span>
+</div>
+<div class="border-l border-[#30363D] pl-2">
+<label class="text-[9px] text-[#8b949e] block">AVG_DOM</label>
+<span class="text-sm font-mono text-white">42 DAYS</span>
+</div>
+</div>
+</div>
+<!-- Recent Alerts -->
+<div class="p-4 flex-1">
+<h3 class="text-[10px] font-bold tracking-[0.2em] text-[#8b949e] mb-4">HIGH_SCORE_ALERTS</h3>
+<div class="space-y-2">
+<div class="bg-surface-container border border-outline-variant p-2 flex gap-3 hover:bg-surface-container-high transition-colors cursor-pointer">
+<div class="w-16 h-16 bg-surface-container-highest shrink-0 relative overflow-hidden">
+<img alt="Modern minimalist residential home exterior with sharp lines and dark siding at twilight" class="w-full h-full object-cover" data-alt="Modern geometric home with large windows and sharp architectural lines at blue hour" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC3V9kT2jhNpQzLe83o97CN0UG2oHBel--Ws3g5G12E2N0Lh4-sTeRqcooBtfLRnGyJ70-31XI6Bw-bG9Mb_yRuTwzf34TYimueoUy-b2lpfA2zEm6GcG7m7tHCUIwzuyzPpGTeTGmYoZw3q-5_Xvp8cJYGFxEwJHCcieaavLjlwTFQBkIg9_cR1k5FQjuuqzxBQaz5K7mlUbejCQJNEONdOegJs7Z2feW3kNTmgeCTbvZQuyp5YiJ34-sGsOpdlfCjG9aqlkyV65s"/>
+<div class="absolute top-0 left-0 bg-secondary px-1 text-[8px] font-bold text-black">92</div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-[10px] font-bold text-white truncate">7421 OAK CLIFF DR.</div>
+<div class="text-[9px] text-[#8b949e]">3BD • 2BA • 2,140 SQFT</div>
+<div class="flex justify-between items-end mt-1">
+<span class="text-xs font-mono text-[#46f1c5]">$412,000</span>
+<span class="text-[8px] font-mono text-secondary">BEST DEAL</span>
+</div>
+</div>
+</div>
+<div class="bg-surface-container border border-outline-variant p-2 flex gap-3 hover:bg-surface-container-high transition-colors cursor-pointer">
+<div class="w-16 h-16 bg-surface-container-highest shrink-0 relative overflow-hidden">
+<img alt="Contemporary suburban house with clean landscaping and warm interior lighting" class="w-full h-full object-cover" data-alt="Modern clean suburban house facade with stone accents and minimalist landscaping" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBLl1-lYemC0aB81S7G08Xd2pmaLiC5GlwHbyvXrfqt5iof4ISF413dV19QZoBlFcCX1Nz0_cD8MuDwQBgszkU28lDaOglpGE67A3THMOZdKHpRt1GDemeH0SRT1Dx-XaTt612LFvyet2CZ3AMzl-VONhje3KakNaqf3MALtKo_d6DYJLOCQle4u8d4iEFAxapIh_gg5rZfvABeZEkBShxezWNJjsiDwPrfdVbiejuRV6SMYanvOYFTPBBX8V7wuytx7_-sIvfPJ54"/>
+<div class="absolute top-0 left-0 bg-secondary px-1 text-[8px] font-bold text-black">88</div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-[10px] font-bold text-white truncate">1204 ESPERANZA CT.</div>
+<div class="text-[9px] text-[#8b949e]">4BD • 3BA • 2,450 SQFT</div>
+<div class="flex justify-between items-end mt-1">
+<span class="text-xs font-mono text-[#46f1c5]">$489,000</span>
+<span class="text-[8px] font-mono text-[#8b949e]">2 DAYS AGO</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Control (Terminal-like action) -->
+<div class="p-4 bg-surface-container-low border-t border-[#30363D]">
+<button class="w-full bg-[#46f1c5] hover:bg-white text-black font-bold py-2 text-[11px] tracking-[0.1em] transition-all duration-75">
+                EXECUTE_ANALYSIS_REFRESH
+            </button>
+</div>
+</aside>
+<!-- Mobile Navigation Suppressed as per Task (Internal Tool focus) -->
+</body></html>

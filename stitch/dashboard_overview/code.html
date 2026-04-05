@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TALARIA | Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "background": "#0d1117",
+                        "surface": "#10141a",
+                        "surface-container": "#1c2128",
+                        "primary": "#46f1c5",
+                        "secondary": "#67df70",
+                        "tertiary": "#ffcf91",
+                        "outline": "#30363d",
+                        "on-surface": "#dfe2eb",
+                        "on-surface-variant": "#8b949e"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px"
+                    },
+                    "fontFamily": {
+                        "sans": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { background-color: #0d1117; color: #dfe2eb; font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; }
+        .section-header { font-family: 'Inter'; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; }
+    </style>
+</head>
+<body class="antialiased overflow-x-hidden">
+<!-- Top Bar -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-background border-b border-outline">
+<div class="flex items-center">
+<span class="text-xl font-black tracking-tighter text-primary uppercase">TALARIA</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<!-- Wallet Pill -->
+<div class="flex items-center gap-2 px-3 py-1 bg-[#00382b] border border-[#00513f] rounded-full">
+<span class="material-symbols-outlined text-[16px] text-primary">account_balance_wallet</span>
+<span class="mono text-xs font-bold text-primary">$12.43</span>
+</div>
+<div class="h-4 w-[1px] bg-outline mx-1"></div>
+<!-- Spend Pill -->
+<div class="flex items-center gap-2 px-3 py-1 bg-surface-container border border-outline rounded-full">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">receipt_long</span>
+<span class="mono text-xs font-bold text-white">$0.07 TODAY</span>
+</div>
+</div>
+<button class="p-1 hover:bg-surface-container text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+</div>
+</header>
+<!-- Narrow Sidebar -->
+<aside class="fixed left-0 top-14 h-[calc(100vh-3.5rem)] w-16 md:w-20 flex flex-col items-center py-6 bg-background border-r border-outline z-40">
+<nav class="flex flex-col gap-6 w-full items-center">
+<a class="p-3 text-primary bg-surface-container border-r-2 border-primary group" href="#" title="Cost Analytics">
+<span class="material-symbols-outlined text-[24px]">bar_chart</span>
+</a>
+<a class="p-3 text-on-surface-variant hover:text-primary hover:bg-surface-container transition-all group" href="#" title="Wallet">
+<span class="material-symbols-outlined text-[24px]">account_balance_wallet</span>
+</a>
+</nav>
+<div class="mt-auto mb-4">
+<button class="p-3 text-on-surface-variant hover:text-white transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</button>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="ml-16 md:ml-20 mt-14 p-8 min-h-screen bg-background">
+<!-- Header Section -->
+<div class="mb-8">
+<h1 class="text-3xl font-black tracking-tight text-white mb-2 uppercase">Overview</h1>
+<p class="mono text-[10px] text-on-surface-variant uppercase tracking-widest">System Integrity: 99.98% // Location: Austin TX // Cycle: 2024.Q1</p>
+</div>
+<!-- 3-Column Module Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+<!-- Housing Card -->
+<div class="h-[220px] bg-surface border border-outline p-5 flex flex-col justify-between hover:border-primary/40 transition-colors">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">home</span>
+<span class="section-header text-xs text-on-surface-variant">Housing</span>
+</div>
+<span class="mono text-xs text-red-400">↓2.1% (90d)</span>
+</div>
+<div class="my-4">
+<div class="mono text-3xl font-bold text-white tracking-tighter">$415,000</div>
+<div class="text-[10px] text-on-surface-variant mono uppercase mt-1">Austin Median Price</div>
+</div>
+<div class="space-y-1.5 border-t border-outline/50 pt-3">
+<div class="flex justify-between text-[11px] font-medium">
+<span class="text-on-surface-variant">Best 30yr Rate</span>
+<span class="mono text-white">5.98%</span>
+</div>
+<div class="flex justify-between text-[11px] font-medium">
+<span class="text-on-surface-variant">Fed Cut Prob</span>
+<span class="mono text-secondary">62%</span>
+</div>
+</div>
+</div>
+<!-- Portfolio Card -->
+<div class="h-[220px] bg-surface border border-outline p-5 flex flex-col justify-between hover:border-primary/40 transition-colors">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">pie_chart</span>
+<span class="section-header text-xs text-on-surface-variant">Portfolio</span>
+</div>
+<span class="mono text-xs text-secondary">+0.8% Δ</span>
+</div>
+<div class="flex items-center gap-6 my-2">
+<div class="relative w-16 h-16">
+<svg class="w-full h-full transform -rotate-90" viewbox="0 0 36 36">
+<circle class="stroke-outline" cx="18" cy="18" fill="none" r="16" stroke-width="4"></circle>
+<circle class="stroke-primary" cx="18" cy="18" fill="none" r="16" stroke-dasharray="70 100" stroke-width="4"></circle>
+<circle class="stroke-secondary" cx="18" cy="18" fill="none" r="16" stroke-dasharray="25 100" stroke-dashoffset="-70" stroke-width="4"></circle>
+</svg>
+</div>
+<div>
+<div class="mono text-2xl font-bold text-white tracking-tighter">$1,248,392</div>
+<div class="text-[10px] text-on-surface-variant mono uppercase">Total Net Capital</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-3 mt-2">
+<div class="bg-background p-2 border border-outline">
+<div class="text-[9px] text-on-surface-variant section-header">Equities</div>
+<div class="mono text-xs text-white">70%</div>
+</div>
+<div class="bg-background p-2 border border-outline">
+<div class="text-[9px] text-on-surface-variant section-header">Crypto</div>
+<div class="mono text-xs text-white">25%</div>
+</div>
+</div>
+</div>
+<!-- Food Card -->
+<div class="h-[220px] bg-surface border border-outline p-5 flex flex-col justify-between hover:border-primary/40 transition-colors">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">shopping_bag</span>
+<span class="section-header text-xs text-on-surface-variant">Food</span>
+</div>
+<div class="bg-background border border-outline p-4 my-2">
+<div class="text-[10px] text-on-surface-variant mono uppercase mb-1">Last Order // Mar 28</div>
+<div class="flex justify-between items-center">
+<div>
+<div class="text-sm font-bold text-white tracking-tight">Pad Thai</div>
+<div class="text-[10px] text-primary mono">Thai Kitchen</div>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="restaurant">restaurant</span>
+</div>
+</div>
+<button class="w-full h-10 border border-primary text-primary hover:bg-primary hover:text-background transition-all text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[16px]">refresh</span>
+                    Quick Reorder
+                </button>
+</div>
+<!-- Add Module Placeholder 1 -->
+<div class="h-[220px] bg-transparent border border-dashed border-outline flex flex-col items-center justify-center gap-3 group hover:border-on-surface-variant transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-outline group-hover:text-on-surface-variant transition-colors text-[32px]">add_circle</span>
+<span class="section-header text-[10px] text-outline group-hover:text-on-surface-variant">Add Module</span>
+</div>
+<!-- Add Module Placeholder 2 -->
+<div class="h-[220px] bg-transparent border border-dashed border-outline flex flex-col items-center justify-center gap-3 group hover:border-on-surface-variant transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-outline group-hover:text-on-surface-variant transition-colors text-[32px]">add_circle</span>
+<span class="section-header text-[10px] text-outline group-hover:text-on-surface-variant">Add Module</span>
+</div>
+<!-- Add Module Placeholder 3 -->
+<div class="h-[220px] bg-transparent border border-dashed border-outline flex flex-col items-center justify-center gap-3 group hover:border-on-surface-variant transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-outline group-hover:text-on-surface-variant transition-colors text-[32px]">add_circle</span>
+<span class="section-header text-[10px] text-outline group-hover:text-on-surface-variant">Add Module</span>
+</div>
+</div>
+<!-- Recent Transactions Table -->
+<section class="mt-12">
+<div class="flex items-center gap-4 mb-6">
+<h2 class="section-header text-sm text-on-surface-variant whitespace-nowrap">Recent Transactions</h2>
+<div class="h-[1px] w-full bg-outline"></div>
+</div>
+<div class="bg-surface border border-outline overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container border-b border-outline">
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant">Timestamp</th>
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant">Service</th>
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant">Module</th>
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant">Rail</th>
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant">Status</th>
+<th class="px-6 py-3 section-header text-[10px] text-on-surface-variant text-right">Cost</th>
+</tr>
+</thead>
+<tbody class="text-xs">
+<tr class="border-b border-outline/50 hover:bg-surface-container transition-colors">
+<td class="px-6 py-4 mono text-on-surface-variant">14:02:11.45</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+<span class="font-bold text-white">Thai Kitchen</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant uppercase">Food</td>
+<td class="px-6 py-4">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">credit_card</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span class="font-bold">Success</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right mono text-primary">$24.50</td>
+</tr>
+<tr class="border-b border-outline/50 hover:bg-surface-container transition-colors">
+<td class="px-6 py-4 mono text-on-surface-variant">13:58:02.91</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+<span class="font-bold text-white">Wells Fargo</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant uppercase">Housing</td>
+<td class="px-6 py-4">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">account_balance</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span class="font-bold">Success</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right mono text-primary">$2,850.00</td>
+</tr>
+<tr class="hover:bg-surface-container transition-colors">
+<td class="px-6 py-4 mono text-on-surface-variant">13:45:55.10</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+<span class="font-bold text-white">Kraken</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant uppercase">Portfolio</td>
+<td class="px-6 py-4">
+<span class="material-symbols-outlined text-[18px] text-on-surface-variant">currency_bitcoin</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-1.5 text-tertiary">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse"></span>
+<span class="font-bold">Pending</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right mono text-on-surface-variant">---</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</main>
+</body></html>

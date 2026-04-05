@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Database
+talaria.db
+*.db
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.env*.local
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Debug
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Claude
+.claude/

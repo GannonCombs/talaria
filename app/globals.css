@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Surfaces */
+  --color-background: #0d1117;
+  --color-surface: #10141a;
+  --color-surface-container-lowest: #0a0e14;
+  --color-surface-container-low: #181c22;
+  --color-surface-container: #1c2026;
+  --color-surface-container-high: #262a31;
+  --color-surface-container-highest: #31353c;
+  --color-surface-bright: #353940;
+
+  /* Accent */
+  --color-primary: #46f1c5;
+  --color-on-primary: #00382b;
+  --color-primary-container: #00d4aa;
+
+  /* Semantic */
+  --color-secondary: #67df70;
+  --color-tertiary: #ffcf91;
+  --color-tertiary-container: #fbab29;
+  --color-error: #ffb4ab;
+
+  /* Borders */
+  --color-outline: #30363d;
+  --color-outline-variant: #3b4a44;
+
+  /* Text */
+  --color-on-surface: #dfe2eb;
+  --color-on-surface-variant: #8b949e;
+
+  /* Border Radius — 0px everywhere, rounded-full preserved */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+
+  /* Fonts */
+  --font-sans: var(--font-inter), "Inter", sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", monospace;
+}
+
+body {
+  background-color: #0d1117;
+  color: #dfe2eb;
+}
+
+/* HUD label utility matching mockup's .section-header */
+@layer components {
+  .section-header {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; }
