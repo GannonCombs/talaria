@@ -8,134 +8,136 @@ export interface FedPrediction {
   source: string;
 }
 
-const MOCK_PREDICTION: FedPrediction = {
-  meetingDate: '2026-05-07',
-  cutProb: 0.62,
-  holdProb: 0.35,
-  hikeProb: 0.03,
-  source: 'mock',
-};
-
 export async function fetchFedPredictions(): Promise<FedPrediction> {
-  // Check cache (fresh if < 15 minutes old)
+  // Return cache if fresh (< 15 minutes)
   const cached = getCachedPrediction();
   if (cached) return cached;
 
-  let polymarketData: Partial<FedPrediction> | null = null;
-  let kalshiData: Partial<FedPrediction> | null = null;
+  // Try Polymarket first, then Kalshi
+  let prediction: FedPrediction | null = null;
 
-  // Try Polymarket
   try {
-    polymarketData = await fetchPolymarket();
+    prediction = await fetchPolymarket();
   } catch {
     // Polymarket unavailable
   }
 
-  // Try Kalshi
-  try {
-    kalshiData = await fetchKalshi();
-  } catch {
-    // Kalshi unavailable
+  if (!prediction) {
+    try {
+      prediction = await fetchKalshi();
+    } catch {
+      // Kalshi unavailable
+    }
   }
 
-  // Combine or fall back to mock
-  let prediction: FedPrediction;
-
-  if (polymarketData && kalshiData) {
-    prediction = {
-      meetingDate: polymarketData.meetingDate ?? kalshiData.meetingDate ?? MOCK_PREDICTION.meetingDate,
-      cutProb: ((polymarketData.cutProb ?? 0) + (kalshiData.cutProb ?? 0)) / 2,
-      holdProb: ((polymarketData.holdProb ?? 0) + (kalshiData.holdProb ?? 0)) / 2,
-      hikeProb: ((polymarketData.hikeProb ?? 0) + (kalshiData.hikeProb ?? 0)) / 2,
-      source: 'combined',
-    };
-  } else if (polymarketData) {
-    prediction = {
-      meetingDate: polymarketData.meetingDate ?? MOCK_PREDICTION.meetingDate,
-      cutProb: polymarketData.cutProb ?? 0,
-      holdProb: polymarketData.holdProb ?? 0,
-      hikeProb: polymarketData.hikeProb ?? 0,
-      source: 'polymarket',
-    };
-  } else if (kalshiData) {
-    prediction = {
-      meetingDate: kalshiData.meetingDate ?? MOCK_PREDICTION.meetingDate,
-      cutProb: kalshiData.cutProb ?? 0,
-      holdProb: kalshiData.holdProb ?? 0,
-      hikeProb: kalshiData.hikeProb ?? 0,
-      source: 'kalshi',
-    };
-  } else {
-    prediction = MOCK_PREDICTION;
+  if (!prediction) {
+    return { meetingDate: '', cutProb: 0, holdProb: 0, hikeProb: 0, source: 'unavailable' };
   }
 
   cachePrediction(prediction);
   return prediction;
 }
 
-async function fetchPolymarket(): Promise<Partial<FedPrediction>> {
+// ── Polymarket (Gamma API) ──
+// Fetches all Fed rate markets for the next FOMC meeting and combines probabilities.
+// Markets: "no change", "25 bps cut", "50+ bps cut", "25+ bps hike"
+
+interface GammaMarket {
+  id: string;
+  question: string;
+  outcomePrices: string; // JSON string: ["yes_price", "no_price"]
+  endDate: string;
+}
+
+async function fetchPolymarket(): Promise<FedPrediction> {
   const res = await fetch(
-    'https://clob.polymarket.com/markets?tag=fed-rates&limit=5',
-    { signal: AbortSignal.timeout(8000) }
+    'https://gamma-api.polymarket.com/markets?limit=100&closed=false&order=volume24hr&ascending=false',
+    { signal: AbortSignal.timeout(10000) }
   );
 
   if (!res.ok) throw new Error(`Polymarket ${res.status}`);
 
-  const data = await res.json();
-  const markets = Array.isArray(data) ? data : data.data ?? [];
+  const markets: GammaMarket[] = await res.json();
 
-  // Find the next FOMC meeting market
-  // Polymarket market structures vary — extract probability from the first relevant market
-  for (const market of markets) {
-    const question = (market.question ?? market.title ?? '').toLowerCase();
-    if (question.includes('cut') || question.includes('fed') || question.includes('fomc')) {
-      const prob = market.outcomePrices?.[0] ?? market.probability ?? null;
-      if (prob !== null) {
-        const cutProb = parseFloat(prob);
-        return {
-          meetingDate: market.endDate ?? MOCK_PREDICTION.meetingDate,
-          cutProb: cutProb,
-          holdProb: 1 - cutProb - 0.03,
-          hikeProb: 0.03,
-        };
-      }
+  // Find Fed interest rate markets
+  const fedMarkets = markets.filter(
+    (m) => m.question.includes('Fed') && m.question.includes('interest')
+  );
+
+  if (fedMarkets.length === 0) throw new Error('No Fed markets found');
+
+  // Parse probabilities from each market
+  let holdProb = 0;
+  let cutProb = 0;
+  let hikeProb = 0;
+  let meetingDate = '';
+
+  for (const market of fedMarkets) {
+    const prices = JSON.parse(market.outcomePrices);
+    const yesPrice = parseFloat(prices[0]);
+    const question = market.question.toLowerCase();
+
+    if (!meetingDate && market.endDate) {
+      meetingDate = market.endDate.split('T')[0];
+    }
+
+    if (question.includes('no change')) {
+      holdProb = yesPrice;
+    } else if (question.includes('decrease') && question.includes('50')) {
+      cutProb += yesPrice; // 50+ bps cut
+    } else if (question.includes('decrease') && question.includes('25')) {
+      cutProb += yesPrice; // 25 bps cut
+    } else if (question.includes('increase')) {
+      hikeProb = yesPrice;
     }
   }
 
-  throw new Error('No Fed market found on Polymarket');
+  return { meetingDate, cutProb, holdProb, hikeProb, source: 'polymarket' };
 }
 
-async function fetchKalshi(): Promise<Partial<FedPrediction>> {
+// ── Kalshi (v2 API) ──
+
+async function fetchKalshi(): Promise<FedPrediction> {
   const res = await fetch(
-    'https://api.elections.kalshi.com/v1/events?series_ticker=FED&limit=5',
-    { signal: AbortSignal.timeout(8000) }
+    'https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXFED&limit=20&status=open',
+    { signal: AbortSignal.timeout(10000) }
   );
 
   if (!res.ok) throw new Error(`Kalshi ${res.status}`);
 
   const data = await res.json();
-  const events = data.events ?? [];
+  const markets = data.markets ?? [];
 
-  for (const event of events) {
-    const markets = event.markets ?? [];
-    for (const market of markets) {
-      const title = (market.title ?? '').toLowerCase();
-      if (title.includes('cut') || title.includes('lower')) {
-        const prob = market.yes_ask ?? market.last_price ?? null;
-        if (prob !== null) {
-          return {
-            meetingDate: event.end_date ?? MOCK_PREDICTION.meetingDate,
-            cutProb: parseFloat(prob),
-            holdProb: 1 - parseFloat(prob) - 0.03,
-            hikeProb: 0.03,
-          };
-        }
-      }
+  let holdProb = 0;
+  let cutProb = 0;
+  let hikeProb = 0;
+  let meetingDate = '';
+
+  for (const market of markets) {
+    const title = (market.title ?? market.subtitle ?? '').toLowerCase();
+    const price = market.last_price_dollars ?? market.yes_ask_dollars ?? 0;
+
+    if (!meetingDate && market.close_time) {
+      meetingDate = market.close_time.split('T')[0];
+    }
+
+    if (title.includes('no change') || title.includes('unchanged')) {
+      holdProb = price;
+    } else if (title.includes('cut') || title.includes('decrease') || title.includes('lower')) {
+      cutProb += price;
+    } else if (title.includes('hike') || title.includes('increase') || title.includes('raise')) {
+      hikeProb = price;
     }
   }
 
-  throw new Error('No Fed event found on Kalshi');
+  if (holdProb === 0 && cutProb === 0 && hikeProb === 0) {
+    throw new Error('No Fed data parsed from Kalshi');
+  }
+
+  return { meetingDate, cutProb, holdProb, hikeProb, source: 'kalshi' };
 }
+
+// ── Cache ──
 
 function getCachedPrediction(): FedPrediction | null {
   const db = getDb();

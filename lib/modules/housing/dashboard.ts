@@ -1,5 +1,6 @@
 import { getDb } from '@/lib/db';
 import type { DashboardMetrics } from '@/lib/modules';
+import { fetchFedPredictions } from './predictions';
 
 export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
   const db = getDb();
@@ -30,13 +31,8 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     )
     .get() as { rate: number } | undefined;
 
-  // Get latest Fed prediction
-  const predRow = db
-    .prepare(
-      `SELECT cut_prob FROM housing_fed_predictions
-       ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get() as { cut_prob: number } | undefined;
+  // Fetch live Fed predictions (uses 15-min cache internally)
+  const pred = await fetchFedPredictions();
 
   // Format values
   const priceStr = medianPrice
@@ -45,12 +41,15 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
 
   const rateStr = rateRow ? `${rateRow.rate}%` : '—';
 
-  const fedStr = predRow
-    ? `${Math.round(predRow.cut_prob * 100)}%`
+  const cutStr = pred.cutProb > 0
+    ? `${Math.round(pred.cutProb * 100)}%`
     : '—';
 
-  // Mock sparkline — simulated 90-day median price trend
-  // In production this would come from historical housing_market_stats rows
+  const hikeStr = pred.hikeProb > 0
+    ? `${Math.round(pred.hikeProb * 100)}%`
+    : '—';
+
+  // Mock sparkline — in production from historical housing_market_stats
   const sparkline = [
     425, 428, 422, 430, 426, 420, 418, 421, 415, 419, 412, 415,
   ];
@@ -64,7 +63,8 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     },
     secondary: [
       { label: 'Best Rate', value: rateStr, valueColor: 'text-primary' },
-      { label: 'Fed Cut Prob', value: fedStr, valueColor: 'text-secondary' },
+      { label: 'Fed Cut', value: cutStr, valueColor: 'text-secondary' },
+      { label: 'Fed Hike', value: hikeStr, valueColor: 'text-tertiary' },
     ],
     sparkline,
   };

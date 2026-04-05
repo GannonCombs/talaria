@@ -185,6 +185,7 @@ export default function HousingMap({
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+          className="brightness-[1.6]"
         />
 
         {/* Neighborhood polygons */}

@@ -108,7 +108,7 @@ export default function ModuleCard({
 
         {/* Secondary metrics — two-column grid, label top, value bottom */}
         {secondaryMetrics && secondaryMetrics.length > 0 && (
-          <div className="grid grid-cols-2 gap-4 border-t border-outline/50 pt-3">
+          <div className={`grid gap-4 border-t border-outline/50 pt-3 ${secondaryMetrics.length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {secondaryMetrics.map((m) => (
               <div key={m.label}>
                 <span className="section-header text-[9px] text-on-surface-variant block">

@@ -1,5 +1,6 @@
 'use client';
 
+import BackButton from '@/components/layout/BackButton';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
 
 interface LeftPanelProps {
@@ -69,6 +70,12 @@ export default function LeftPanel({
 
   return (
     <div className="h-full overflow-y-auto border-r border-outline bg-background p-4 space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <BackButton />
+        <h2 className="text-lg font-bold tracking-tight text-on-surface">Housing</h2>
+      </div>
+
       {/* My Profile */}
       <section>
         <div className="flex items-center justify-between mb-3">
