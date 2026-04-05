@@ -2,16 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import {
-  X,
+  ArrowLeft,
   ExternalLink,
   Bookmark,
   BookmarkCheck,
-  Home,
   Calendar,
   Ruler,
   DollarSign,
 } from 'lucide-react';
-import { calculateMortgage, rateSensitivity } from '@/lib/modules/housing/mortgage';
+import { calculateMortgage } from '@/lib/modules/housing/mortgage';
 
 interface Listing {
   id: number;
@@ -43,23 +42,30 @@ interface ListingDrawerProps {
   neighborhoodScore: NeighborhoodScore | null;
   zipMedianPrice: number;
   zipMedianDom: number;
-  currentRate: number;
   downPaymentPct: number;
   loanTermYears: number;
+  allRates?: { product: string; rate: number; apr: number }[];
   onClose: () => void;
 }
+
+const TERM_OPTIONS = [
+  { key: '30yr_fixed', label: '30 yr', years: 30 },
+  { key: '20yr_fixed', label: '20 yr', years: 20 },
+  { key: '15yr_fixed', label: '15 yr', years: 15 },
+  { key: '10yr_fixed', label: '10 yr', years: 10 },
+];
 
 export default function ListingDrawer({
   listing,
   neighborhoodScore,
   zipMedianPrice,
   zipMedianDom,
-  currentRate,
   downPaymentPct,
-  loanTermYears,
+  allRates = [],
   onClose,
 }: ListingDrawerProps) {
   const [tracked, setTracked] = useState(false);
+  const [selectedTerm, setSelectedTerm] = useState('30yr_fixed');
   const [hoaOverride, setHoaOverride] = useState<number | null>(null);
   const [insuranceOverride, setInsuranceOverride] = useState<number | null>(null);
   const [editingHoa, setEditingHoa] = useState(false);
@@ -68,33 +74,32 @@ export default function ListingDrawer({
   const effectiveHoa = hoaOverride ?? listing.hoaMonthly;
   const effectiveInsurance = insuranceOverride ?? listing.price * 0.006;
 
+  // Find best rate for selected term
+  const bestRates = new Map<string, number>();
+  for (const r of allRates) {
+    if (!bestRates.has(r.product) || r.rate < bestRates.get(r.product)!) {
+      bestRates.set(r.product, r.rate);
+    }
+  }
+
+  const termConfig = TERM_OPTIONS.find((t) => t.key === selectedTerm) ?? TERM_OPTIONS[0];
+  const termRate = bestRates.get(selectedTerm) ?? 5.98;
+
   const mortgage = calculateMortgage({
     homePrice: listing.price,
     downPaymentPct,
-    interestRate: currentRate,
-    loanTermYears,
+    interestRate: termRate,
+    loanTermYears: termConfig.years,
     annualPropertyTax: listing.taxAnnual,
     annualInsurance: effectiveInsurance,
     monthlyHoa: effectiveHoa,
   });
 
-  const sensitivity = rateSensitivity({
-    homePrice: listing.price,
-    downPaymentPct,
-    currentRate,
-    loanTermYears,
-    annualPropertyTax: listing.taxAnnual,
-  });
-
-  // Check if tracked
   useEffect(() => {
     fetch('/api/housing/track')
       .then((r) => r.json())
       .then((data) => {
-        const isTracked = data.some(
-          (t: { listing_id: number }) => t.listing_id === listing.id
-        );
-        setTracked(isTracked);
+        setTracked(data.some((t: { listing_id: number }) => t.listing_id === listing.id));
       })
       .catch(() => {});
   }, [listing.id]);
@@ -117,27 +122,23 @@ export default function ListingDrawer({
   }
 
   const ppsf = listing.sqft > 0 ? listing.price / listing.sqft : 0;
-  const medianPpsf = zipMedianPrice > 0 && listing.sqft > 0 ? zipMedianPrice / listing.sqft : 0;
   const priceVsMedian = zipMedianPrice > 0
     ? ((listing.price - zipMedianPrice) / zipMedianPrice * 100).toFixed(1)
     : null;
 
   return (
-    <div className="absolute top-0 right-0 w-[400px] h-full bg-background border-l border-outline z-[1100] flex flex-col shadow-[-4px_0_12px_rgba(0,0,0,0.5)]">
-      {/* Header / Photo placeholder */}
-      <div className="relative h-48 bg-surface-container-high shrink-0 flex items-center justify-center">
-        <Home size={48} className="text-on-surface-variant opacity-20" />
-        {listing.dealScore !== null && (
-          <div className="absolute top-3 left-3 bg-primary text-on-primary px-2 py-1 text-xs font-bold font-mono">
-            SCORE {listing.dealScore}
-          </div>
-        )}
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1 bg-surface-container border border-outline text-on-surface-variant hover:text-on-surface"
-        >
-          <X size={16} />
+    <div className="h-full bg-background border-l border-outline flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-outline shrink-0">
+        <button onClick={onClose} className="flex items-center gap-2 text-on-surface-variant hover:text-on-surface">
+          <ArrowLeft size={16} />
+          <span className="text-sm">Back</span>
         </button>
+        {listing.dealScore !== null && (
+          <span className="bg-primary text-on-primary px-2 py-1 text-xs font-bold font-mono">
+            SCORE {listing.dealScore}
+          </span>
+        )}
       </div>
 
       {/* Scrollable content */}
@@ -147,53 +148,81 @@ export default function ListingDrawer({
           <h2 className="text-lg font-bold text-on-surface tracking-tight">
             {listing.address}
           </h2>
-          <div className="text-[10px] text-on-surface-variant font-mono mt-1">
+          <div className="text-xs text-on-surface-variant font-mono mt-1">
             {listing.zip} · Built {listing.yearBuilt}
           </div>
-          <div className="flex gap-4 mt-2 text-xs text-on-surface-variant">
+          <div className="flex gap-4 mt-2 text-sm text-on-surface-variant">
             <span>{listing.beds} bd</span>
             <span>{listing.baths} ba</span>
             <span>{listing.sqft.toLocaleString()} sqft</span>
-            <span>{listing.lotSqft.toLocaleString()} lot</span>
           </div>
         </div>
 
-        {/* DOM context */}
-        <div className="flex items-center gap-2 text-xs">
+        {/* DOM */}
+        <div className="flex items-center gap-2 text-sm">
           <Calendar size={14} className="text-on-surface-variant" />
           <span className="text-on-surface">
             {listing.daysOnMarket} days on market
           </span>
-          <span className="text-on-surface-variant">
-            (avg {zipMedianDom} in {listing.zip})
+          <span className="text-on-surface-variant text-xs">
+            (avg {zipMedianDom})
           </span>
         </div>
 
         {/* Price */}
         <div className="bg-surface-container-low border border-outline p-4">
-          <div className="flex justify-between items-end">
-            <div>
-              <div className="font-mono text-2xl font-bold text-on-surface">
-                ${listing.price.toLocaleString()}
-              </div>
-              <div className="text-[10px] text-on-surface-variant font-mono mt-1">
-                <Ruler size={10} className="inline mr-1" />
-                ${ppsf.toFixed(0)}/sqft
-                {priceVsMedian && (
-                  <span className={Number(priceVsMedian) < 0 ? 'text-secondary ml-2' : 'text-error ml-2'}>
-                    {Number(priceVsMedian) > 0 ? '+' : ''}{priceVsMedian}% vs median
-                  </span>
-                )}
-              </div>
-            </div>
+          <div className="font-mono text-2xl font-bold text-on-surface">
+            ${listing.price.toLocaleString()}
+          </div>
+          <div className="text-xs text-on-surface-variant font-mono mt-1">
+            <Ruler size={10} className="inline mr-1" />
+            ${ppsf.toFixed(0)}/sqft
+            {priceVsMedian && (
+              <span className={Number(priceVsMedian) < 0 ? 'text-secondary ml-2' : 'text-error ml-2'}>
+                {Number(priceVsMedian) > 0 ? '+' : ''}{priceVsMedian}% vs median
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Monthly Cost Breakdown */}
+        {/* Mortgage Calculator */}
         <div className="bg-surface-container-low border border-outline p-4">
-          <h3 className="section-header text-[10px] text-on-surface-variant mb-3">
-            Monthly Cost Breakdown
+          <h3 className="section-header text-xs text-on-surface-variant mb-3">
+            Mortgage Calculator
           </h3>
+
+          {/* Term tabs */}
+          <div className="flex border border-outline mb-4">
+            {TERM_OPTIONS.map((term) => {
+              const rate = bestRates.get(term.key);
+              return (
+                <button
+                  key={term.key}
+                  onClick={() => setSelectedTerm(term.key)}
+                  className={`flex-1 py-2 text-center ${
+                    selectedTerm === term.key
+                      ? 'bg-surface-container-highest text-primary'
+                      : 'text-on-surface-variant hover:bg-surface-container'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{term.label}</div>
+                  <div className="font-mono text-[10px]">
+                    {rate ? `${rate}%` : '—'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Headline: total interest */}
+          <div className="text-center mb-4 pb-4 border-b border-outline/50">
+            <div className="text-xs text-on-surface-variant mb-1">Total Mortgage Interest</div>
+            <div className="font-mono text-2xl font-bold text-error">
+              ${mortgage.total_interest_lifetime.toLocaleString()}
+            </div>
+          </div>
+
+          {/* Breakdown */}
           <div className="space-y-2">
             <CostRow label="Principal & Interest" value={mortgage.principal_interest} />
             <CostRow label="Property Tax" value={mortgage.property_tax} />
@@ -217,48 +246,34 @@ export default function ListingDrawer({
             />
             {mortgage.pmi > 0 && <CostRow label="PMI" value={mortgage.pmi} />}
             <div className="border-t border-outline pt-2 flex justify-between font-bold">
-              <span className="text-xs text-on-surface">Total Monthly</span>
-              <span className="font-mono text-sm text-primary">
+              <span className="text-sm text-on-surface">Total Monthly</span>
+              <span className="font-mono text-base text-primary">
                 ${mortgage.total_monthly.toLocaleString()}
               </span>
             </div>
           </div>
-        </div>
 
-        {/* Rate Sensitivity */}
-        <div className="bg-surface-container-low border border-outline p-4">
-          <h3 className="section-header text-[10px] text-on-surface-variant mb-3">
-            Rate Sensitivity
-          </h3>
-          <div className="space-y-1">
-            {sensitivity.map((s) => (
-              <div
-                key={s.rate}
-                className={`flex justify-between text-xs py-1 ${
-                  s.rateChange === 0 ? 'text-primary font-bold' : 'text-on-surface-variant'
-                }`}
-              >
-                <span className="font-mono">
-                  {s.rateChange > 0 ? '+' : ''}{s.rateChange.toFixed(2)}% → {s.rate}%
-                </span>
-                <span className="font-mono">
-                  ${s.monthlyPayment.toLocaleString()}/mo
-                </span>
-              </div>
-            ))}
+          <div className="text-xs text-on-surface-variant font-mono mt-3">
+            Down payment: ${(listing.price * downPaymentPct / 100).toLocaleString()} ({downPaymentPct}%)
           </div>
         </div>
 
-        {/* Neighborhood Score */}
+        {/* Neighborhood */}
         {neighborhoodScore && (
-          <div className="flex gap-2">
-            <ScorePill label="Neighborhood" value={neighborhoodScore.compositeScore} />
-            <ScorePill label="Walk Score" value={neighborhoodScore.walkScore} />
+          <div className="flex gap-3">
+            <div className="flex-1 bg-surface-container-low border border-outline p-3 text-center">
+              <div className="section-header text-[10px] text-on-surface-variant">Neighborhood</div>
+              <div className="font-mono text-lg font-bold text-on-surface">{neighborhoodScore.compositeScore}</div>
+            </div>
+            <div className="flex-1 bg-surface-container-low border border-outline p-3 text-center">
+              <div className="section-header text-[10px] text-on-surface-variant">Walk Score</div>
+              <div className="font-mono text-lg font-bold text-on-surface">{neighborhoodScore.walkScore}</div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Action buttons — sticky bottom */}
+      {/* Action buttons */}
       <div className="shrink-0 p-4 border-t border-outline bg-surface-container-low flex gap-2">
         <a
           href={`https://www.zillow.com/homes/${encodeURIComponent(listing.address + ' ' + listing.zip)}`}
@@ -315,7 +330,7 @@ function CostRow({
 
   if (editing && onSave && onCancel) {
     return (
-      <div className="flex justify-between items-center text-xs">
+      <div className="flex justify-between items-center text-sm">
         <span className="text-on-surface-variant">{label}</span>
         <div className="flex items-center gap-1">
           <span className="text-on-surface-variant">$</span>
@@ -326,19 +341,15 @@ function CostRow({
             className="w-16 bg-surface-container-lowest border border-primary text-xs px-1 py-0.5 text-on-surface font-mono focus:outline-none"
             autoFocus
           />
-          <button onClick={() => onSave(Number(editValue))} className="text-primary text-[10px] font-bold">
-            OK
-          </button>
-          <button onClick={onCancel} className="text-on-surface-variant text-[10px]">
-            ✕
-          </button>
+          <button onClick={() => onSave(Number(editValue))} className="text-primary text-xs font-bold">OK</button>
+          <button onClick={onCancel} className="text-on-surface-variant text-xs">X</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex justify-between items-center text-xs">
+    <div className="flex justify-between items-center text-sm">
       <span className="text-on-surface-variant">{label}</span>
       <div className="flex items-center gap-1">
         <span className="font-mono text-on-surface">${value.toFixed(2)}</span>
@@ -348,15 +359,6 @@ function CostRow({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-function ScorePill({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex-1 bg-surface-container-low border border-outline p-2 text-center">
-      <div className="section-header text-[8px] text-on-surface-variant">{label}</div>
-      <div className="font-mono text-sm font-bold text-on-surface">{value}</div>
     </div>
   );
 }

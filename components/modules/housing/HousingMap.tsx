@@ -1,20 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   MapContainer,
   TileLayer,
-  Polygon,
+  GeoJSON,
   CircleMarker,
-  Polyline,
   Tooltip,
   useMap,
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { FeatureCollection } from 'geojson';
 import {
-  ZIP_BOUNDARIES,
-  ISOCHRONE_JOLLYVILLE,
-  ISOCHRONE_DOWNTOWN,
   AUSTIN_CENTER,
   DEFAULT_ZOOM,
 } from '@/lib/modules/housing/geodata';
@@ -40,97 +37,60 @@ interface ListingPin {
   longitude: number;
 }
 
-type ColorByMode = 'score' | 'price' | 'monthly';
+interface IsochroneAddress {
+  id: string;
+  label: string;
+  lat: number;
+  lng: number;
+  color: string;
+}
 
 interface HousingMapProps {
   neighborhoods: NeighborhoodScore[];
   listings: ListingPin[];
+  isochroneAddresses: IsochroneAddress[];
   onListingClick?: (id: number) => void;
-}
-
-function scoreToColor(score: number): string {
-  // Teal gradient: low score = dim, high score = bright
-  const intensity = Math.round((score / 100) * 200 + 55);
-  return `rgba(70, 241, 197, ${(intensity / 255).toFixed(2)})`;
-}
-
-function priceToColor(price: number): string {
-  // Green (cheap) to red (expensive)
-  const ratio = Math.min(1, price / 700000);
-  const r = Math.round(ratio * 255);
-  const g = Math.round((1 - ratio) * 200);
-  return `rgba(${r}, ${g}, 100, 0.5)`;
-}
-
-function getPolygonColor(
-  n: NeighborhoodScore,
-  mode: ColorByMode
-): string {
-  switch (mode) {
-    case 'score':
-      return scoreToColor(n.compositeScore);
-    case 'price':
-      return priceToColor(n.medianPrice);
-    case 'monthly':
-      return priceToColor(n.medianPrice * 0.006); // rough monthly proxy
-    default:
-      return scoreToColor(n.compositeScore);
-  }
 }
 
 function getPinColor(dealScore: number | null): string {
   if (dealScore === null) return '#8b949e';
-  if (dealScore >= 85) return '#fbab29'; // amber for high-score
-  return '#46f1c5'; // teal for normal
+  if (dealScore >= 85) return '#fbab29';
+  return '#46f1c5';
 }
 
 function getPinRadius(dealScore: number | null): number {
   if (dealScore === null) return 5;
-  return 4 + (dealScore / 100) * 4; // 4-8px based on score
+  return 4 + (dealScore / 100) * 4;
 }
 
-// Controls overlay component
+// Map controls
 function MapControls({
-  colorBy,
-  setColorBy,
-  showPolygons,
-  setShowPolygons,
+  showNeighborhoods,
+  setShowNeighborhoods,
   showIsochrones,
   setShowIsochrones,
+  showFloodZones,
+  setShowFloodZones,
 }: {
-  colorBy: ColorByMode;
-  setColorBy: (m: ColorByMode) => void;
-  showPolygons: boolean;
-  setShowPolygons: (v: boolean) => void;
+  showNeighborhoods: boolean;
+  setShowNeighborhoods: (v: boolean) => void;
   showIsochrones: boolean;
   setShowIsochrones: (v: boolean) => void;
+  showFloodZones: boolean;
+  setShowFloodZones: (v: boolean) => void;
 }) {
   return (
-    <div className="absolute top-4 right-4 z-[1000] bg-surface-container border border-outline p-3 space-y-3">
-      <div>
-        <label className="section-header text-[9px] text-on-surface-variant block mb-1">
-          Color By
-        </label>
-        <select
-          value={colorBy}
-          onChange={(e) => setColorBy(e.target.value as ColorByMode)}
-          className="w-full bg-surface-container-lowest border border-outline text-xs px-2 py-1 text-on-surface focus:border-primary focus:outline-none"
-        >
-          <option value="score">Personal Score</option>
-          <option value="price">Median Price</option>
-          <option value="monthly">Est. Monthly</option>
-        </select>
-      </div>
-      <label className="flex items-center gap-2 text-[10px] text-on-surface-variant cursor-pointer">
+    <div className="absolute top-4 right-4 z-[1000] bg-surface-container border border-outline p-3 space-y-2">
+      <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
         <input
           type="checkbox"
-          checked={showPolygons}
-          onChange={(e) => setShowPolygons(e.target.checked)}
+          checked={showNeighborhoods}
+          onChange={(e) => setShowNeighborhoods(e.target.checked)}
           className="accent-primary"
         />
-        Zip Polygons
+        Neighborhoods
       </label>
-      <label className="flex items-center gap-2 text-[10px] text-on-surface-variant cursor-pointer">
+      <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
         <input
           type="checkbox"
           checked={showIsochrones}
@@ -139,37 +99,73 @@ function MapControls({
         />
         Isochrones
       </label>
+      <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
+        <input
+          type="checkbox"
+          checked={showFloodZones}
+          onChange={(e) => setShowFloodZones(e.target.checked)}
+          className="accent-primary"
+        />
+        Flood Zones
+      </label>
     </div>
   );
 }
 
-// Invalidate map size when container changes
 function MapResizer() {
   const map = useMap();
   setTimeout(() => map.invalidateSize(), 100);
   return null;
 }
 
+// Style each Census tract — for now, a uniform teal tint.
+// Round 3 will color by price trend (green/red).
+function tractStyle(): Record<string, unknown> {
+  return {
+    color: '#30363d',
+    weight: 0.5,
+    fillColor: 'transparent',
+    fillOpacity: 0,
+  };
+}
+
 export default function HousingMap({
   neighborhoods,
   listings,
+  isochroneAddresses,
   onListingClick,
 }: HousingMapProps) {
-  const [colorBy, setColorBy] = useState<ColorByMode>('score');
-  const [showPolygons, setShowPolygons] = useState(true);
+  const [showNeighborhoods, setShowNeighborhoods] = useState(true);
   const [showIsochrones, setShowIsochrones] = useState(true);
+  const [showFloodZones, setShowFloodZones] = useState(false);
+  const [tractData, setTractData] = useState<FeatureCollection | null>(null);
+  const [floodData, setFloodData] = useState<FeatureCollection | null>(null);
 
-  const neighborhoodMap = new Map(neighborhoods.map((n) => [n.zip, n]));
+  useEffect(() => {
+    fetch('/travis-tracts.geojson')
+      .then((r) => r.json())
+      .then(setTractData)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (showFloodZones && !floodData) {
+      fetch('/austin-flood-zones.geojson')
+        .then((r) => r.json())
+        .then(setFloodData)
+        .catch(() => {});
+    }
+  }, [showFloodZones, floodData]);
 
   return (
     <div className="relative w-full h-full">
       <MapControls
-        colorBy={colorBy}
-        setColorBy={setColorBy}
-        showPolygons={showPolygons}
-        setShowPolygons={setShowPolygons}
+        showNeighborhoods={showNeighborhoods}
+        setShowNeighborhoods={setShowNeighborhoods}
         showIsochrones={showIsochrones}
         setShowIsochrones={setShowIsochrones}
+        showFloodZones={showFloodZones}
+        setShowFloodZones={setShowFloodZones}
       />
 
       <MapContainer
@@ -181,71 +177,55 @@ export default function HousingMap({
       >
         <MapResizer />
 
-        {/* Dark tile layer — CartoDB dark_matter (free, no token) */}
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-          className="brightness-[1.6]"
+          url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
+          attribution='&copy; <a href="https://stadiamaps.com/">Stadia</a>'
         />
 
-        {/* Neighborhood polygons */}
-        {showPolygons &&
-          Object.entries(ZIP_BOUNDARIES).map(([zip, coords]) => {
-            const n = neighborhoodMap.get(zip);
-            const color = n
-              ? getPolygonColor(n, colorBy)
-              : 'rgba(70, 241, 197, 0.1)';
-            return (
-              <Polygon
-                key={zip}
-                positions={coords}
-                pathOptions={{
-                  color: '#46f1c5',
-                  weight: 1,
-                  fillColor: color,
-                  fillOpacity: 0.35,
-                }}
-              >
-                <Tooltip
-                  className="!bg-surface-container !border-outline !text-on-surface !text-xs !font-mono !rounded-none !shadow-none"
-                >
-                  <div>
-                    <strong>{zip}</strong>
-                    {n && (
-                      <>
-                        <br />Score: {n.compositeScore}
-                        <br />Median: ${n.medianPrice.toLocaleString()}
-                      </>
-                    )}
-                  </div>
-                </Tooltip>
-              </Polygon>
-            );
-          })}
-
-        {/* Isochrone boundaries */}
-        {showIsochrones && (
-          <>
-            <Polyline
-              positions={[...ISOCHRONE_JOLLYVILLE, ISOCHRONE_JOLLYVILLE[0]]}
-              pathOptions={{
-                color: '#46f1c5',
-                weight: 2,
-                dashArray: '8 4',
-                opacity: 0.6,
-              }}
-            />
-            <Polyline
-              positions={[...ISOCHRONE_DOWNTOWN, ISOCHRONE_DOWNTOWN[0]]}
-              pathOptions={{
-                color: '#fbab29',
-                weight: 2,
-                dashArray: '8 4',
-                opacity: 0.6,
-              }}
-            />
-          </>
+        {/* Census tract boundaries */}
+        {showNeighborhoods && tractData && (
+          <GeoJSON
+            data={tractData}
+            style={tractStyle}
+          />
         )}
+
+        {/* Flood zones */}
+        {showFloodZones && floodData && (
+          <GeoJSON
+            data={floodData}
+            style={() => ({
+              color: '#f87171',
+              weight: 0.5,
+              fillColor: '#f87171',
+              fillOpacity: 0.25,
+            })}
+          />
+        )}
+
+        {/* Isochrone center dots + boundaries (driven by live addresses) */}
+        {showIsochrones && isochroneAddresses
+          .filter((a) => a.lat !== 0 && a.lng !== 0)
+          .map((addr) => (
+            <CircleMarker
+              key={addr.id}
+              center={[addr.lat, addr.lng]}
+              radius={6}
+              pathOptions={{
+                color: addr.color,
+                fillColor: addr.color,
+                fillOpacity: 1,
+                weight: 2,
+              }}
+            >
+              <Tooltip
+                className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none"
+              >
+                {addr.label || 'Unnamed'}
+              </Tooltip>
+            </CircleMarker>
+          ))
+        }
 
         {/* Listing pins */}
         {listings.map((listing) => (
@@ -272,18 +252,10 @@ export default function HousingMap({
                 <span className="font-mono">
                   ${listing.price.toLocaleString()}
                 </span>
-                {listing.monthlyCost && (
-                  <>
-                    <br />
-                    <span className="font-mono text-[10px]">
-                      ${listing.monthlyCost.toLocaleString()}/mo
-                    </span>
-                  </>
-                )}
                 {listing.dealScore !== null && (
                   <>
                     <br />
-                    Deal Score: {listing.dealScore}
+                    Score: {listing.dealScore}
                   </>
                 )}
                 <br />

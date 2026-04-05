@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { getDb } from './db';
 
 const KEYS_DIR = path.join(process.cwd(), 'keys');
@@ -39,36 +40,49 @@ export interface LinkedAccount {
 export interface WalletInfo {
   exists: boolean;
   evmAddress: string;
+  evmAddressFull: string;
   solanaAddress: string;
+  solanaAddressFull: string;
   totalUsd: number;
   evmBalances: ChainBalance[];
   solanaBalances: ChainBalance[];
   linkedAccounts: LinkedAccount[];
 }
 
-// ── Wallet creation ──
-
 interface CreateWalletResult {
   evmAddress: string;
   solanaAddress: string;
 }
 
+// Derive a Solana Ed25519 keypair deterministically from the EVM private key.
+// Uses HKDF to derive 32 bytes of Ed25519 seed from the secp256k1 key.
+function deriveSolanaKeypair(evmPrivateKey: string) {
+  const ikm = Buffer.from(evmPrivateKey.replace('0x', ''), 'hex');
+  const salt = Buffer.from('talaria-solana-derivation', 'utf8');
+  const info = Buffer.from('ed25519-seed', 'utf8');
+  const prk = crypto.createHmac('sha256', salt).update(ikm).digest();
+  const seed = crypto.createHmac('sha256', prk).update(Buffer.concat([info, Buffer.from([1])])).digest().subarray(0, 32);
+  return seed;
+}
+
 export async function createWallet(): Promise<CreateWalletResult> {
   const { ethers } = await import('ethers');
-  const crypto = await import('crypto');
+  const { Keypair } = await import('@solana/web3.js');
 
+  // Generate one private key
   const wallet = ethers.Wallet.createRandom();
   const privateKey = wallet.privateKey;
   const evmAddress = wallet.address;
 
-  // Derive Solana address from same entropy (different curve)
-  const solanaBytes = crypto.createHash('sha256').update(privateKey).digest();
-  const solanaAddress = 'So' + solanaBytes.subarray(0, 16).toString('hex');
+  // Derive Solana keypair from the same key
+  const solanaSeed = deriveSolanaKeypair(privateKey);
+  const solanaKeypair = Keypair.fromSeed(solanaSeed);
+  const solanaAddress = solanaKeypair.publicKey.toBase58();
 
-  // Save private key to filesystem, NOT the database
+  // Store one key
   savePrivateKey(privateKey);
 
-  // Only store addresses in DB (safe to lose — derivable from the key)
+  // Store addresses in DB
   const db = getDb();
   const upsert = db.prepare(
     `INSERT INTO user_preferences (key, value, updated_at)
@@ -86,6 +100,46 @@ export async function createWallet(): Promise<CreateWalletResult> {
 
 export function walletExists(): boolean {
   return loadPrivateKey() !== null;
+}
+
+// Recover addresses from the stored private key if DB was reset
+async function recoverAddresses(): Promise<void> {
+  const raw = loadPrivateKey();
+  if (!raw) return;
+
+  const { ethers } = await import('ethers');
+  const { Keypair } = await import('@solana/web3.js');
+
+  // Handle old JSON format or raw hex
+  let evmKey: string;
+  try {
+    const parsed = JSON.parse(raw);
+    evmKey = parsed.evm;
+  } catch {
+    evmKey = raw;
+  }
+
+  const wallet = new ethers.Wallet(evmKey);
+  const solanaSeed = deriveSolanaKeypair(evmKey);
+  const solanaKeypair = Keypair.fromSeed(solanaSeed);
+
+  const db = getDb();
+  const upsert = db.prepare(
+    `INSERT INTO user_preferences (key, value, updated_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  );
+
+  upsert.run('wallet.evm_address', wallet.address);
+  upsert.run('wallet.solana_address', solanaKeypair.publicKey.toBase58());
+
+  // If old JSON format, convert to just the raw key
+  try {
+    JSON.parse(raw);
+    savePrivateKey(evmKey);
+  } catch {
+    // Already raw format
+  }
 }
 
 function getStoredAddresses(): { evmAddress: string; solanaAddress: string } {
@@ -109,11 +163,21 @@ function truncateAddress(addr: string): string {
 }
 
 export async function getWalletBalance(): Promise<WalletInfo> {
+  // If key file exists but addresses aren't in DB, re-derive them
+  if (walletExists()) {
+    const { evmAddress, solanaAddress } = getStoredAddresses();
+    if (!evmAddress || !solanaAddress) {
+      await recoverAddresses();
+    }
+  }
+
   if (!walletExists()) {
     return {
       exists: false,
       evmAddress: '',
+      evmAddressFull: '',
       solanaAddress: '',
+      solanaAddressFull: '',
       totalUsd: 0,
       evmBalances: [],
       solanaBalances: [],
@@ -123,8 +187,6 @@ export async function getWalletBalance(): Promise<WalletInfo> {
 
   const { evmAddress, solanaAddress } = getStoredAddresses();
 
-  // Phase 2 will query on-chain balances via RPC.
-  // For now, all balances are zero until funded.
   const evmBalances: ChainBalance[] = [
     { chain: 'tempo', symbol: 'USDC', balance: 0, usdValue: 0 },
     { chain: 'base', symbol: 'USDC', balance: 0, usdValue: 0 },
@@ -137,7 +199,9 @@ export async function getWalletBalance(): Promise<WalletInfo> {
   return {
     exists: true,
     evmAddress: truncateAddress(evmAddress),
+    evmAddressFull: evmAddress,
     solanaAddress: truncateAddress(solanaAddress),
+    solanaAddressFull: solanaAddress,
     totalUsd: 0,
     evmBalances,
     solanaBalances,

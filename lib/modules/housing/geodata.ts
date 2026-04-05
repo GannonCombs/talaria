@@ -36,6 +36,12 @@ export const ISOCHRONE_DOWNTOWN: [number, number][] = [
   [30.24, -97.85], [30.28, -97.84],
 ];
 
+// Isochrone center points (the addresses being measured from)
+export const ISOCHRONE_CENTERS: { label: string; position: [number, number]; color: string }[] = [
+  { label: 'Visa Jollyville', position: [30.4441, -97.7584], color: '#46f1c5' },
+  { label: 'Downtown Austin', position: [30.2672, -97.7431], color: '#fbab29' },
+];
+
 // Austin center coordinates
 export const AUSTIN_CENTER: [number, number] = [30.2672, -97.7431];
 export const DEFAULT_ZOOM = 11;

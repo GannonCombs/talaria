@@ -9,18 +9,20 @@ interface HoldingsProps {
   exists: boolean;
   totalUsd: number;
   evmAddress: string;
+  evmAddressFull: string;
   solanaAddress: string;
+  solanaAddressFull: string;
   evmBalances: ChainBalance[];
   solanaBalances: ChainBalance[];
   linkedAccounts: LinkedAccount[];
   onCreateWallet: () => Promise<void>;
 }
 
-function CopyableAddress({ label, address }: { label: string; address: string }) {
+function CopyableAddress({ label, address, copyValue }: { label: string; address: string; copyValue: string }) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
-    navigator.clipboard.writeText(address);
+    navigator.clipboard.writeText(copyValue);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -87,7 +89,9 @@ export default function Holdings({
   exists,
   totalUsd,
   evmAddress,
+  evmAddressFull,
   solanaAddress,
+  solanaAddressFull,
   evmBalances,
   solanaBalances,
   linkedAccounts,
@@ -136,7 +140,7 @@ export default function Holdings({
         <>
           {evmBalances.length > 0 && (
             <div className="mb-6">
-              <CopyableAddress label="EVM" address={evmAddress} />
+              <CopyableAddress label="EVM" address={evmAddress} copyValue={evmAddressFull} />
               <div className="border border-outline divide-y divide-outline/30">
                 {[...evmGroups.entries()].map(([chain, balances]) => (
                   <ChainGroup key={chain} chain={chain} balances={balances} />
@@ -147,7 +151,7 @@ export default function Holdings({
 
           {solanaBalances.length > 0 && (
             <div className="mb-6">
-              <CopyableAddress label="Solana" address={solanaAddress} />
+              <CopyableAddress label="Solana" address={solanaAddress} copyValue={solanaAddressFull} />
               <div className="border border-outline divide-y divide-outline/30">
                 {[...solanaGroups.entries()].map(([chain, balances]) => (
                   <ChainGroup key={chain} chain={chain} balances={balances} />

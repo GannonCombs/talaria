@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { getDb } from '@/lib/db';
 import type { DashboardMetrics } from '@/lib/modules';
 import { fetchFedPredictions } from './predictions';
@@ -44,10 +46,15 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     ? `${Math.round(pred.hikeProb * 100)}%`
     : '—';
 
-  // Mock sparkline — in production from historical housing_market_stats
-  const sparkline = [
-    425, 428, 422, 430, 426, 420, 418, 421, 415, 419, 412, 415,
-  ];
+  // Read real ZHVI sparkline data
+  let sparkline: number[] | undefined;
+  try {
+    const zhviPath = path.join(process.cwd(), 'public', 'austin-zhvi.json');
+    const zhviData: { value: number }[] = JSON.parse(fs.readFileSync(zhviPath, 'utf8'));
+    sparkline = zhviData.slice(-12).map((d) => d.value / 1000);
+  } catch {
+    // No ZHVI data available
+  }
 
   return {
     primary: {

@@ -11,7 +11,9 @@ export default function WalletPage() {
     exists,
     totalUsd,
     evmAddress,
+    evmAddressFull,
     solanaAddress,
+    solanaAddressFull,
     evmBalances,
     solanaBalances,
     linkedAccounts,
@@ -39,7 +41,9 @@ export default function WalletPage() {
           exists={exists}
           totalUsd={totalUsd}
           evmAddress={evmAddress}
+          evmAddressFull={evmAddressFull}
           solanaAddress={solanaAddress}
+          solanaAddressFull={solanaAddressFull}
           evmBalances={evmBalances}
           solanaBalances={solanaBalances}
           linkedAccounts={linkedAccounts}

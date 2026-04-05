@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import LeftPanel from '@/components/modules/housing/LeftPanel';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import BackButton from '@/components/layout/BackButton';
+import LeftPanel, { type IsochroneAddress } from '@/components/modules/housing/LeftPanel';
 import RightPanel from '@/components/modules/housing/RightPanel';
 import ListingDrawer from '@/components/modules/housing/ListingDrawer';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
@@ -58,16 +60,11 @@ interface FedPrediction {
   hikeProb: number;
 }
 
-interface MarketStats {
-  medianPrice: number;
-  medianPpsf: number;
-  activeListings: number;
-  medianDom: number;
-}
-
 interface Filters {
-  minSqft: number;
+  priceMin: number;
+  priceMax: number;
   minBeds: number;
+  minSqft: number;
   maxDom: number;
 }
 
@@ -84,182 +81,162 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
 const TARGET_ZIPS = ['78745', '78704', '78749', '78748', '78731'];
 
 export default function HousingPage() {
-  // State
   const [neighborhoods, setNeighborhoods] = useState<NeighborhoodScore[]>([]);
   const [listings, setListings] = useState<ListingData[]>([]);
   const [weights, setWeights] = useState<ScoringWeights>(DEFAULT_WEIGHTS);
-  const [filters, setFilters] = useState<Filters>({ minSqft: 0, minBeds: 0, maxDom: 0 });
+  const [filters, setFilters] = useState<Filters>({ priceMin: 0, priceMax: 0, minBeds: 0, minSqft: 0, maxDom: 0 });
   const [rates, setRates] = useState<RateData[]>([]);
   const [prediction, setPrediction] = useState<FedPrediction | null>(null);
-  const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState<number | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [isoAddresses, setIsoAddresses] = useState<IsochroneAddress[]>([
+    { id: '1', label: 'Visa', address: '12301 Research Blvd, Building 3, Austin, TX 78759', lat: 30.4441, lng: -97.7584, color: '#46f1c5' },
+    { id: '2', label: 'Convention Center', address: '500 E Cesar Chavez St, Austin, TX 78701', lat: 30.2614, lng: -97.7396, color: '#fbab29' },
+  ]);
 
-  // Preferences (read from DB)
+  // Preferences
   const [budget, setBudget] = useState(550000);
   const [downPaymentPct, setDownPaymentPct] = useState(20);
-  const [loanTermYears, setLoanTermYears] = useState(30);
-  const [creditScoreTier, setCreditScoreTier] = useState('excellent');
+  const [creditScore, setCreditScore] = useState('excellent');
 
-  // Load preferences
   useEffect(() => {
     fetch('/api/preferences')
       .then((r) => r.json())
       .then((prefs) => {
         if (prefs['housing.budget']) setBudget(Number(prefs['housing.budget']));
         if (prefs['housing.down_payment_pct']) setDownPaymentPct(Number(prefs['housing.down_payment_pct']));
-        if (prefs['housing.loan_term_years']) setLoanTermYears(Number(prefs['housing.loan_term_years']));
-        if (prefs['housing.credit_score_tier']) setCreditScoreTier(prefs['housing.credit_score_tier']);
+        if (prefs['housing.credit_score_tier']) setCreditScore(prefs['housing.credit_score_tier']);
         if (prefs['housing.scoring_weights']) {
-          try { setWeights(JSON.parse(prefs['housing.scoring_weights'])); } catch { /* use defaults */ }
+          try { setWeights(JSON.parse(prefs['housing.scoring_weights'])); } catch { /* defaults */ }
         }
       })
       .catch(() => {});
   }, []);
 
-  // Load data
   const loadData = useCallback(async () => {
-    // Neighborhoods
     const scoresRes = await fetch('/api/housing/scores');
-    if (scoresRes.ok) {
-      setNeighborhoods(await scoresRes.json());
-    }
+    if (scoresRes.ok) setNeighborhoods(await scoresRes.json());
 
-    // Listings
     const allListings: ListingData[] = [];
     for (const zip of TARGET_ZIPS) {
       const params = new URLSearchParams({ zip });
-      if (filters.minSqft) params.set('minSqft', String(filters.minSqft));
+      if (filters.priceMin) params.set('minPrice', String(filters.priceMin));
+      if (filters.priceMax) params.set('maxPrice', String(filters.priceMax));
       if (filters.minBeds) params.set('minBeds', String(filters.minBeds));
+      if (filters.minSqft) params.set('minSqft', String(filters.minSqft));
       if (filters.maxDom) params.set('maxDom', String(filters.maxDom));
       const res = await fetch(`/api/housing/listings?${params}`);
       if (res.ok) allListings.push(...(await res.json()));
     }
     setListings(allListings);
 
-    // Rates — fetch all terms
     const rateRes = await fetch('/api/housing/rates?refresh=true');
     if (rateRes.ok) {
       const r = await rateRes.json();
       if (Array.isArray(r)) setRates(r);
     }
 
-    // Predictions
     const predRes = await fetch('/api/housing/predictions');
     if (predRes.ok) setPrediction(await predRes.json());
-
-    // Market stats (aggregate from first zip)
-    const mktRes = await fetch('/api/housing/market?zip=78745');
-    if (mktRes.ok) setMarketStats(await mktRes.json());
-  }, [budget, filters]);
+  }, [filters]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Recompute scores when weights change
-  async function recomputeScores(newWeights: ScoringWeights) {
-    setWeights(newWeights);
-    const best30 = rates.find((r) => r.product === '30yr_fixed');
-    const currentRate = best30?.rate ?? 5.98;
-    await fetch('/api/housing/scores', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weights: newWeights, budget, currentRate }),
-    });
-    // Reload neighborhoods and listings to get updated scores
-    const scoresRes = await fetch('/api/housing/scores');
-    if (scoresRes.ok) setNeighborhoods(await scoresRes.json());
-
-    const allListings: ListingData[] = [];
-    for (const zip of TARGET_ZIPS) {
-      const res = await fetch(`/api/housing/listings?zip=${zip}`);
-      if (res.ok) allListings.push(...(await res.json()));
-    }
-    setListings(allListings);
-  }
-
-  // Refresh data from external sources
-  async function handleRefresh() {
-    setRefreshing(true);
-    try {
-      // Fetch fresh rates
-      await fetch(`/api/housing/rates?refresh=true&homeValue=${budget}&downPayment=${budget * downPaymentPct / 100}&creditScore=${creditScoreTier}&zip=78745`);
-      // Fetch fresh predictions
-      await fetch('/api/housing/predictions');
-      // Recompute scores
-      await recomputeScores(weights);
-      // Reload everything
-      await loadData();
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
-  function handleListingClick(id: number) {
-    setSelectedListingId(id);
-  }
-
   const selectedListing = listings.find((l) => l.id === selectedListingId) ?? null;
   const selectedNeighborhood = selectedListing
     ? neighborhoods.find((n) => n.zip === selectedListing.zip) ?? null
     : null;
-  const selectedZipStats = marketStats; // TODO: per-zip stats lookup
 
-  // Top listings by deal score
   const topListings = [...listings]
     .filter((l) => l.dealScore !== null)
     .sort((a, b) => (b.dealScore ?? 0) - (a.dealScore ?? 0))
-    .slice(0, 5);
+    .slice(0, 3);
 
   return (
-    <div className="h-[calc(100vh-3.5rem-4rem)] grid grid-cols-[280px_1fr_320px]">
-      {/* Left Panel */}
-      <LeftPanel
-        budget={budget}
-        downPaymentPct={downPaymentPct}
-        loanTermYears={loanTermYears}
-        creditScoreTier={creditScoreTier}
-        weights={weights}
-        onWeightsChange={recomputeScores}
-        filters={filters}
-        onFiltersChange={setFilters}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
-      />
-
-      {/* Map */}
-      <div className="relative overflow-hidden">
-        <HousingMap
-          neighborhoods={neighborhoods}
-          listings={listings}
-          onListingClick={handleListingClick}
-        />
+    <div className="h-[calc(100vh-3.5rem-2rem)] flex flex-col">
+      {/* Top Bar */}
+      <div className="flex items-center px-4 py-2 border-b border-outline shrink-0">
+        <div className="flex items-center gap-3">
+          <BackButton />
+          <h1 className="text-lg font-bold tracking-tight text-on-surface">
+            Housing
+          </h1>
+        </div>
       </div>
 
-      {/* Right Panel + Drawer overlay */}
-      <div className="relative overflow-hidden">
-        <RightPanel
-          rates={rates}
-          prediction={prediction}
-          marketStats={marketStats}
-          topListings={topListings}
-          onListingClick={handleListingClick}
-        />
+      {/* Three-column layout */}
+      <div className={`flex-1 grid ${leftCollapsed ? 'grid-cols-[auto_1fr_320px]' : 'grid-cols-[260px_1fr_320px]'} overflow-hidden`}>
+        {/* Left Panel */}
+        <div className="relative border-r border-outline">
+          {leftCollapsed ? (
+            <div className="h-full flex items-start pt-4 px-1 bg-background">
+              <button
+                onClick={() => setLeftCollapsed(false)}
+                className="p-2 text-on-surface-variant hover:text-on-surface"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="h-full relative">
+              <button
+                onClick={() => setLeftCollapsed(true)}
+                className="absolute top-3 right-3 z-10 p-1 text-on-surface-variant hover:text-on-surface"
+              >
+                <PanelLeftClose size={14} />
+              </button>
+              <LeftPanel
+                filters={filters}
+                onFiltersChange={setFilters}
+                weights={weights}
+                onWeightsChange={setWeights}
+                budget={budget}
+                downPaymentPct={downPaymentPct}
+                creditScore={creditScore}
+                onBudgetChange={setBudget}
+                onDownPaymentChange={setDownPaymentPct}
+                onCreditScoreChange={setCreditScore}
+                isochroneAddresses={isoAddresses}
+                onIsochroneAddressesChange={setIsoAddresses}
+              />
+            </div>
+          )}
+        </div>
 
-        {/* Listing Detail Drawer */}
-        {selectedListing && (
-          <ListingDrawer
-            listing={selectedListing}
-            neighborhoodScore={selectedNeighborhood}
-            zipMedianPrice={selectedZipStats?.medianPrice ?? 415000}
-            zipMedianDom={selectedZipStats?.medianDom ?? 28}
-            currentRate={rates.find((r) => r.product === '30yr_fixed')?.rate ?? 5.98}
-            downPaymentPct={downPaymentPct}
-            loanTermYears={loanTermYears}
-            onClose={() => setSelectedListingId(null)}
+        {/* Map */}
+        <div className="relative overflow-hidden">
+          <HousingMap
+            neighborhoods={neighborhoods}
+            listings={listings}
+            isochroneAddresses={isoAddresses}
+            onListingClick={setSelectedListingId}
           />
-        )}
+        </div>
+
+        {/* Right Panel */}
+        <div className="relative overflow-hidden">
+          {selectedListing ? (
+            <ListingDrawer
+              listing={selectedListing}
+              neighborhoodScore={selectedNeighborhood}
+              zipMedianPrice={415000}
+              zipMedianDom={28}
+              downPaymentPct={downPaymentPct}
+              loanTermYears={30}
+              allRates={rates}
+              onClose={() => setSelectedListingId(null)}
+            />
+          ) : (
+            <RightPanel
+              rates={rates}
+              prediction={prediction}
+              topListings={topListings}
+              onListingClick={setSelectedListingId}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
