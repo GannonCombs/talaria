@@ -38,7 +38,7 @@ export default function SpendChart({ data }: SpendChartProps) {
             No spend data yet
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
             <AreaChart data={data}>
               <defs>
                 <linearGradient id="spendGrad" x1="0" y1="0" x2="0" y2="1">

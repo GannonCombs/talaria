@@ -39,7 +39,7 @@ export default function ServiceDonut({ data, totalSpend }: ServiceDonutProps) {
           <>
             {/* Donut */}
             <div className="relative w-32 h-32 shrink-0">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <PieChart>
                   <Pie
                     data={data}

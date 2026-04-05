@@ -13,6 +13,7 @@ import TransactionTable, {
 } from '@/components/dashboard/TransactionTable';
 import { getRegisteredModules, type DashboardMetrics } from '@/lib/modules';
 import { getDb } from '@/lib/db';
+import { DEMO_MODE } from '@/lib/config';
 
 // Force dynamic rendering — dashboard reads live DB data
 export const dynamic = 'force-dynamic';
@@ -65,7 +66,7 @@ function PortfolioDonut() {
       </div>
       <div>
         <div className="font-mono text-2xl font-bold text-white tracking-tighter">
-          $1,248,392
+          {DEMO_MODE ? '$1,248,392' : '$—'}
         </div>
         <div className="text-[10px] text-on-surface-variant font-mono uppercase">
           Total Net Capital
@@ -82,13 +83,13 @@ function PortfolioSecondaryMetrics() {
         <div className="text-[9px] text-on-surface-variant section-header">
           Equities
         </div>
-        <div className="font-mono text-xs text-white">70%</div>
+        <div className="font-mono text-xs text-white">{DEMO_MODE ? '70%' : '—'}</div>
       </div>
       <div className="bg-background p-2 border border-outline">
         <div className="text-[9px] text-on-surface-variant section-header">
           Crypto
         </div>
-        <div className="font-mono text-xs text-white">25%</div>
+        <div className="font-mono text-xs text-white">{DEMO_MODE ? '25%' : '—'}</div>
       </div>
     </div>
   );

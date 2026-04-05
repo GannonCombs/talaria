@@ -27,5 +27,8 @@ npm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Wallet keys
+keys/
+
 # Claude
 .claude/

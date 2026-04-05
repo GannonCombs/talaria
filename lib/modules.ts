@@ -52,6 +52,7 @@ export function getModule(id: string): ModuleDefinition | undefined {
 // ── Module registrations ──
 
 import { HOUSING_TABLES_SQL } from './modules/housing/tables';
+import { DEMO_MODE } from './config';
 
 registerModule({
   id: 'housing',
@@ -92,14 +93,14 @@ registerModule({
   services: ['Alpha Vantage', 'Kraken'],
   getDashboardMetrics: async () => ({
     primary: {
-      label: 'Total Net Capital',
-      value: '$1,248,392',
-      trend: '+0.8% Δ',
-      trendDirection: 'up',
+      label: 'Net Capital',
+      value: DEMO_MODE ? '$1,248,392' : '$—',
+      trend: DEMO_MODE ? '+0.8% Δ' : undefined,
+      trendDirection: DEMO_MODE ? ('up' as const) : undefined,
     },
     secondary: [
-      { label: 'Equities', value: '70%' },
-      { label: 'Crypto', value: '25%' },
+      { label: 'Equities', value: DEMO_MODE ? '70%' : '—' },
+      { label: 'Crypto', value: DEMO_MODE ? '25%' : '—' },
     ],
     customContent: 'portfolio-donut',
   }),

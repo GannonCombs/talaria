@@ -93,7 +93,6 @@ export default function HousingPage() {
   const [prediction, setPrediction] = useState<FedPrediction | null>(null);
   const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [seeded, setSeeded] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState<number | null>(null);
 
   // Preferences (read from DB)
@@ -123,19 +122,7 @@ export default function HousingPage() {
     // Neighborhoods
     const scoresRes = await fetch('/api/housing/scores');
     if (scoresRes.ok) {
-      const data = await scoresRes.json();
-      if (data.length === 0 && !seeded) {
-        await fetch('/api/housing/seed', { method: 'POST' });
-        await fetch('/api/housing/scores', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ budget, currentRate: 5.98 }),
-        });
-        setSeeded(true);
-        loadData();
-        return;
-      }
-      setNeighborhoods(data);
+      setNeighborhoods(await scoresRes.json());
     }
 
     // Listings
@@ -164,7 +151,7 @@ export default function HousingPage() {
     // Market stats (aggregate from first zip)
     const mktRes = await fetch('/api/housing/market?zip=78745');
     if (mktRes.ok) setMarketStats(await mktRes.json());
-  }, [budget, filters, seeded]);
+  }, [budget, filters]);
 
   useEffect(() => {
     loadData();

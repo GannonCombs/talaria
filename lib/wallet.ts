@@ -1,4 +1,28 @@
+import fs from 'fs';
+import path from 'path';
 import { getDb } from './db';
+
+const KEYS_DIR = path.join(process.cwd(), 'keys');
+const PK_FILE = path.join(KEYS_DIR, 'wallet.key');
+
+function ensureKeysDir() {
+  if (!fs.existsSync(KEYS_DIR)) {
+    fs.mkdirSync(KEYS_DIR, { mode: 0o700 });
+  }
+}
+
+function savePrivateKey(privateKey: string) {
+  ensureKeysDir();
+  fs.writeFileSync(PK_FILE, privateKey, { mode: 0o600 });
+}
+
+function loadPrivateKey(): string | null {
+  try {
+    return fs.readFileSync(PK_FILE, 'utf8').trim();
+  } catch {
+    return null;
+  }
+}
 
 export interface ChainBalance {
   chain: string;
@@ -41,6 +65,10 @@ export async function createWallet(): Promise<CreateWalletResult> {
   const solanaBytes = crypto.createHash('sha256').update(privateKey).digest();
   const solanaAddress = 'So' + solanaBytes.subarray(0, 16).toString('hex');
 
+  // Save private key to filesystem, NOT the database
+  savePrivateKey(privateKey);
+
+  // Only store addresses in DB (safe to lose — derivable from the key)
   const db = getDb();
   const upsert = db.prepare(
     `INSERT INTO user_preferences (key, value, updated_at)
@@ -48,7 +76,6 @@ export async function createWallet(): Promise<CreateWalletResult> {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   );
 
-  upsert.run('wallet.private_key', privateKey);
   upsert.run('wallet.evm_address', evmAddress);
   upsert.run('wallet.solana_address', solanaAddress);
 
@@ -58,11 +85,7 @@ export async function createWallet(): Promise<CreateWalletResult> {
 // ── Wallet state ──
 
 export function walletExists(): boolean {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'wallet.evm_address'")
-    .get() as { value: string } | undefined;
-  return !!row?.value;
+  return loadPrivateKey() !== null;
 }
 
 function getStoredAddresses(): { evmAddress: string; solanaAddress: string } {
