@@ -13,7 +13,7 @@ function getWalletTint(balance: number) {
 
 export default function TopBar() {
   const { today } = useCostTracker();
-  const { balance } = useWallet();
+  const { totalUsd } = useWallet();
 
   return (
     <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-background border-b border-outline">
@@ -28,11 +28,11 @@ export default function TopBar() {
           {/* Wallet Pill — live from API */}
           <Link
             href="/wallet"
-            className={`flex items-center gap-2 px-3 py-1 rounded-full border ${getWalletTint(balance)}`}
+            className={`flex items-center gap-2 px-3 py-1 rounded-full border ${getWalletTint(totalUsd)}`}
           >
             <Wallet size={16} className="text-primary" />
             <span className="font-mono text-xs font-bold text-primary">
-              ${balance.toFixed(2)}
+              ${totalUsd.toFixed(2)}
             </span>
           </Link>
 

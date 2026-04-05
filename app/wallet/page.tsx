@@ -2,20 +2,31 @@
 
 import BackButton from '@/components/layout/BackButton';
 import { useWallet } from '@/hooks/useWallet';
-import WalletCard from '@/components/wallet/WalletCard';
-import FundingChannels from '@/components/wallet/FundingChannels';
-import RecentActivity from '@/components/wallet/RecentActivity';
-import PaymentMethods from '@/components/wallet/PaymentMethods';
+import Holdings from '@/components/wallet/Holdings';
+import FundWallet from '@/components/wallet/FundWallet';
 import SpendingControls from '@/components/wallet/SpendingControls';
 
 export default function WalletPage() {
-  const { balance, address, network } = useWallet();
+  const {
+    exists,
+    totalUsd,
+    evmAddress,
+    solanaAddress,
+    evmBalances,
+    solanaBalances,
+    linkedAccounts,
+    refresh,
+  } = useWallet();
+
+  async function handleCreateWallet() {
+    await fetch('/api/wallet', { method: 'POST' });
+    await refresh();
+  }
 
   return (
     <>
-      {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center gap-3 mb-1">
+        <div className="flex items-center gap-3">
           <BackButton />
           <h1 className="text-2xl font-bold tracking-tight text-on-surface">
             Wallet
@@ -23,21 +34,22 @@ export default function WalletPage() {
         </div>
       </div>
 
-      {/* Top row: Wallet Card + Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <WalletCard balance={balance} address={address} network={network} />
-        <RecentActivity />
-      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 mb-6 items-stretch">
+        <Holdings
+          exists={exists}
+          totalUsd={totalUsd}
+          evmAddress={evmAddress}
+          solanaAddress={solanaAddress}
+          evmBalances={evmBalances}
+          solanaBalances={solanaBalances}
+          linkedAccounts={linkedAccounts}
+          onCreateWallet={handleCreateWallet}
+        />
 
-      {/* Middle row: Funding Channels */}
-      <div className="mb-6">
-        <FundingChannels />
-      </div>
-
-      {/* Bottom row: Payment Methods + Spending Controls */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PaymentMethods />
-        <SpendingControls />
+        <div className="space-y-6">
+          <FundWallet />
+          <SpendingControls />
+        </div>
       </div>
     </>
   );

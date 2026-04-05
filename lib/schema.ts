@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 4;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -41,9 +41,8 @@ export const DEFAULT_PREFERENCES: Record<string, string> = {
   name: 'Gannon Combs',
   city: 'Austin',
   state: 'TX',
-  daily_spend_limit: 'null',
-  low_balance_alert: '2.00',
-  auto_pause_empty: 'true',
+  daily_spend_limit: '50',
+  low_balance_alert: '5.00',
   // Housing module
   'housing.budget': '550000',
   'housing.down_payment_pct': '20',

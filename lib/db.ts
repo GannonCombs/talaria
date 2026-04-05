@@ -23,27 +23,89 @@ export function getDb(): Database.Database {
 }
 
 function initializeDatabase(db: Database.Database): void {
-  const tableExists = db
+  const versionRow = db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
     )
     .get();
 
-  if (!tableExists) {
-    db.exec(CREATE_TABLES_SQL);
-
-    // Create module-specific tables
-    for (const mod of getRegisteredModules()) {
-      for (const sql of mod.getTables()) {
-        db.exec(sql);
-      }
-    }
-
-    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(
-      SCHEMA_VERSION
-    );
-    seedDefaults(db);
+  if (!versionRow) {
+    // Fresh DB — create everything
+    buildSchema(db);
+    return;
   }
+
+  // Check if schema is outdated
+  const currentVersion = db
+    .prepare('SELECT version FROM schema_version LIMIT 1')
+    .get() as { version: number } | undefined;
+
+  if (!currentVersion || currentVersion.version < SCHEMA_VERSION) {
+    // Schema changed — drop all tables and rebuild
+    resetDatabase(db);
+    buildSchema(db);
+  }
+}
+
+function buildSchema(db: Database.Database): void {
+  db.exec(CREATE_TABLES_SQL);
+
+  for (const mod of getRegisteredModules()) {
+    for (const sql of mod.getTables()) {
+      db.exec(sql);
+    }
+  }
+
+  db.prepare(
+    'INSERT OR REPLACE INTO schema_version (version) VALUES (?)'
+  ).run(SCHEMA_VERSION);
+
+  seedDefaults(db);
+
+  // Restore wallet keys if they were preserved from a reset
+  const saved = (db as Database.Database & { _walletKeys?: { key: string; value: string }[] })._walletKeys;
+  if (saved && saved.length > 0) {
+    const upsert = db.prepare(
+      `INSERT OR REPLACE INTO user_preferences (key, value, updated_at)
+       VALUES (?, ?, datetime('now'))`
+    );
+    for (const { key, value } of saved) {
+      upsert.run(key, value);
+    }
+    delete (db as Database.Database & { _walletKeys?: unknown })._walletKeys;
+  }
+}
+
+function resetDatabase(db: Database.Database): void {
+  // Preserve wallet keys across resets
+  let walletKeys: { key: string; value: string }[] = [];
+  try {
+    walletKeys = db
+      .prepare("SELECT key, value FROM user_preferences WHERE key LIKE 'wallet.%'")
+      .all() as { key: string; value: string }[];
+  } catch {
+    // Table may not exist yet
+  }
+
+  // Drop all tables
+  const tables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    )
+    .all() as { name: string }[];
+
+  for (const { name } of tables) {
+    db.exec(`DROP TABLE IF EXISTS "${name}"`);
+  }
+
+  // Store wallet keys to restore after rebuild
+  (db as Database.Database & { _walletKeys?: typeof walletKeys })._walletKeys = walletKeys;
+}
+
+export function resetDb(): void {
+  const db = getDb();
+  resetDatabase(db);
+  buildSchema(db);
 }
 
 function seedDefaults(db: Database.Database): void {

@@ -1,18 +1,27 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import type { ChainBalance, LinkedAccount } from '@/lib/wallet';
 
 interface WalletState {
-  balance: number;
-  address: string;
-  network: string;
+  exists: boolean;
+  evmAddress: string;
+  solanaAddress: string;
+  totalUsd: number;
+  evmBalances: ChainBalance[];
+  solanaBalances: ChainBalance[];
+  linkedAccounts: LinkedAccount[];
 }
 
 export function useWallet() {
   const [wallet, setWallet] = useState<WalletState>({
-    balance: 0,
-    address: '',
-    network: '',
+    exists: false,
+    evmAddress: '',
+    solanaAddress: '',
+    totalUsd: 0,
+    evmBalances: [],
+    solanaBalances: [],
+    linkedAccounts: [],
   });
 
   const refresh = useCallback(async () => {

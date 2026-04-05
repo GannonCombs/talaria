@@ -168,13 +168,6 @@ function SpendingControlsSection({
             onUpdate('low_balance_alert', v ? '2.00' : '0')
           }
         />
-        <Toggle
-          label="Auto-pause on empty"
-          enabled={prefs.auto_pause_empty === 'true'}
-          onToggle={(v) =>
-            onUpdate('auto_pause_empty', v ? 'true' : 'false')
-          }
-        />
       </div>
     </section>
   );
