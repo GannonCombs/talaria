@@ -149,7 +149,7 @@ export default function HousingMap({
   onListingClick,
 }: HousingMapProps) {
   const [showNeighborhoods, setShowNeighborhoods] = useState(true);
-  const [showIsochrones, setShowIsochrones] = useState(true);
+  const [showIsochrones, setShowIsochrones] = useState(false);
   const [showFloodZones, setShowFloodZones] = useState(false);
   const [tractData, setTractData] = useState<FeatureCollection | null>(null);
   const [floodData, setFloodData] = useState<FeatureCollection | null>(null);

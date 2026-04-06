@@ -8,50 +8,42 @@ import { getLatestRate } from './bankrate';
 export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
   const db = getDb();
 
-  // Read city from preferences
   const cityRow = db
     .prepare("SELECT value FROM user_preferences WHERE key = 'city'")
     .get() as { value: string } | undefined;
   const city = cityRow?.value ?? 'Austin';
 
-  // Get latest market stats (aggregate across target zips)
-  const statsRow = db
-    .prepare(
-      `SELECT AVG(median_price) as avg_price
-       FROM housing_market_stats
-       WHERE date = (SELECT MAX(date) FROM housing_market_stats)`
-    )
-    .get() as { avg_price: number | null } | undefined;
-
-  const medianPrice = statsRow?.avg_price ?? null;
-
-  // Get best 30yr rate for dashboard display
   const bestRate = getLatestRate('30yr_fixed');
-
-  // Fetch live Fed predictions (uses 15-min cache internally)
   const pred = await fetchFedPredictions();
 
-  // Format values
-  const priceStr = medianPrice
-    ? `$${Math.round(medianPrice / 1000)}K`
-    : '$—';
-
   const rateStr = bestRate ? `${bestRate.rate}%` : '—';
+  const cutStr = pred.cutProb > 0 ? `${Math.round(pred.cutProb * 100)}%` : '—';
+  const hikeStr = pred.hikeProb > 0 ? `${Math.round(pred.hikeProb * 100)}%` : '—';
 
-  const cutStr = pred.cutProb > 0
-    ? `${Math.round(pred.cutProb * 100)}%`
-    : '—';
-
-  const hikeStr = pred.hikeProb > 0
-    ? `${Math.round(pred.hikeProb * 100)}%`
-    : '—';
-
-  // Read real ZHVI sparkline data
+  // Read real ZHVI data for median price + sparkline + trend
+  let priceStr = '$—';
+  let trend: string | undefined;
+  let trendDirection: 'up' | 'down' | undefined;
   let sparkline: number[] | undefined;
+
   try {
     const zhviPath = path.join(process.cwd(), 'public', 'austin-zhvi.json');
-    const zhviData: { value: number }[] = JSON.parse(fs.readFileSync(zhviPath, 'utf8'));
-    sparkline = zhviData.slice(-12).map((d) => d.value / 1000);
+    const zhviData: { date: string; value: number }[] = JSON.parse(fs.readFileSync(zhviPath, 'utf8'));
+
+    if (zhviData.length > 0) {
+      const latest = zhviData[zhviData.length - 1].value;
+      priceStr = `$${Math.round(latest / 1000)}K`;
+
+      // Compute real trend from 3 months ago
+      if (zhviData.length >= 4) {
+        const threeMonthsAgo = zhviData[zhviData.length - 4].value;
+        const pctChange = ((latest - threeMonthsAgo) / threeMonthsAgo) * 100;
+        trendDirection = pctChange < 0 ? 'down' : 'up';
+        trend = `${trendDirection === 'down' ? '↓' : '↑'}${Math.abs(pctChange).toFixed(1)}% (90d)`;
+      }
+
+      sparkline = zhviData.slice(-12).map((d) => d.value / 1000);
+    }
   } catch {
     // No ZHVI data available
   }
@@ -60,8 +52,8 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     primary: {
       label: `${city} Median Price`,
       value: priceStr,
-      trend: medianPrice ? '↓2.1% (90d)' : undefined,
-      trendDirection: 'down',
+      trend,
+      trendDirection,
     },
     secondary: [
       { label: 'Best 30yr', value: rateStr, valueColor: 'text-primary' },
