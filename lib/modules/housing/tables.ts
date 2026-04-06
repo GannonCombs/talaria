@@ -81,4 +81,13 @@ export const HOUSING_TABLES_SQL = `
     tracked_at TEXT NOT NULL DEFAULT (datetime('now')),
     notes TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS mpp_cache (
+    cache_key TEXT PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    response TEXT NOT NULL,
+    cost_usd REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT
+  );
 `;

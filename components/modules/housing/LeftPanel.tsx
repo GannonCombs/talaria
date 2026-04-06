@@ -19,6 +19,7 @@ export interface IsochroneAddress {
   lat: number;
   lng: number;
   color: string;
+  driveMinutes: number;
 }
 
 interface LeftPanelProps {
@@ -34,6 +35,7 @@ interface LeftPanelProps {
   onCreditScoreChange: (v: string) => void;
   isochroneAddresses: IsochroneAddress[];
   onIsochroneAddressesChange: (addrs: IsochroneAddress[]) => void;
+  onIsochroneSubmit: () => void;
 }
 
 type SectionView = 'menu' | 'isochrones' | 'scoring' | 'budget';
@@ -81,6 +83,7 @@ export default function LeftPanel({
   onCreditScoreChange,
   isochroneAddresses,
   onIsochroneAddressesChange,
+  onIsochroneSubmit,
 }: LeftPanelProps) {
   const [section, setSection] = useState<SectionView>('menu');
   const [moreOptions, setMoreOptions] = useState(false);
@@ -100,7 +103,7 @@ export default function LeftPanel({
       const nextColor = ISO_COLORS[isochroneAddresses.length] ?? '#8b949e';
       onIsochroneAddressesChange([
         ...isochroneAddresses,
-        { id: crypto.randomUUID(), label: '', address: '', lat: 0, lng: 0, color: nextColor },
+        { id: crypto.randomUUID(), label: '', address: '', lat: 0, lng: 0, color: nextColor, driveMinutes: 30 },
       ]);
     }
 
@@ -143,7 +146,7 @@ export default function LeftPanel({
         </button>
         <h3 className="section-header text-xs text-on-surface mb-4">Isochrone Addresses</h3>
         <p className="text-xs text-on-surface-variant mb-4">
-          Each address generates a 30-minute drive-time boundary on the map. Up to 5 addresses.
+          Each address generates a drive-time boundary on the map. Up to 5 addresses.
         </p>
 
         <div className="space-y-4">
@@ -164,24 +167,34 @@ export default function LeftPanel({
                   <Trash2 size={14} />
                 </button>
               </div>
-              <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Address or place name"
+                value={addr.address}
+                onChange={(e) => updateAddress(addr.id, 'address', e.target.value)}
+                className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+              />
+              <div className="flex gap-2 items-center">
                 <input
-                  type="text"
-                  placeholder="Address or place name"
-                  value={addr.address}
-                  onChange={(e) => updateAddress(addr.id, 'address', e.target.value)}
-                  className="flex-1 bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+                  type="number"
+                  min={5}
+                  max={60}
+                  value={addr.driveMinutes}
+                  onChange={(e) => updateAddress(addr.id, 'driveMinutes', Number(e.target.value))}
+                  className="w-16 bg-surface-container-lowest border border-outline text-sm px-2 py-1.5 text-on-surface font-mono focus:border-primary focus:outline-none text-center"
                 />
+                <span className="text-xs text-on-surface-variant">min</span>
+                <div className="flex-1" />
                 <button
-                  onClick={() => geocodeAddress(addr.id, addr.address)}
-                  className="px-3 py-2 border border-outline text-xs text-on-surface-variant hover:border-primary hover:text-primary shrink-0"
+                  onClick={async () => { await geocodeAddress(addr.id, addr.address); onIsochroneSubmit(); }}
+                  className="px-3 py-1.5 border border-primary text-xs text-primary hover:bg-primary hover:text-on-primary shrink-0"
                 >
-                  Locate
+                  Go
                 </button>
               </div>
               {addr.lat !== 0 && (
-                <div className="text-[10px] text-secondary font-mono">
-                  Located: {addr.lat.toFixed(4)}, {addr.lng.toFixed(4)}
+                <div className="text-[10px] text-on-surface-variant font-mono">
+                  {addr.lat.toFixed(4)}, {addr.lng.toFixed(4)} · {addr.driveMinutes} min
                 </div>
               )}
             </div>

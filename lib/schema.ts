@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (

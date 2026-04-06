@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import * as turf from '@turf/turf';
 import BackButton from '@/components/layout/BackButton';
 import LeftPanel, { type IsochroneAddress } from '@/components/modules/housing/LeftPanel';
 import RightPanel from '@/components/modules/housing/RightPanel';
@@ -90,9 +91,90 @@ export default function HousingPage() {
   const [selectedListingId, setSelectedListingId] = useState<number | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [isoAddresses, setIsoAddresses] = useState<IsochroneAddress[]>([
-    { id: '1', label: 'Visa', address: '12301 Research Blvd, Building 3, Austin, TX 78759', lat: 30.4441, lng: -97.7584, color: '#46f1c5' },
-    { id: '2', label: 'Convention Center', address: '500 E Cesar Chavez St, Austin, TX 78701', lat: 30.2614, lng: -97.7396, color: '#fbab29' },
+    { id: '1', label: 'Visa', address: '12301 Research Blvd, Building 3, Austin, TX 78759', lat: 30.4255, lng: -97.7529, color: '#46f1c5', driveMinutes: 30 },
+    { id: '2', label: 'Convention Center', address: '500 E Cesar Chavez St, Austin, TX 78701', lat: 30.2624, lng: -97.7409, color: '#fbab29', driveMinutes: 30 },
   ]);
+  const [isoPolygons, setIsoPolygons] = useState<Array<{ id: string; color: string; label: string; polygon: [number, number][]; driveMinutes: number }>>([]);
+  const [isoLoading, setIsoLoading] = useState(false);
+  const [isoFetchTrigger, setIsoFetchTrigger] = useState(0);
+
+  // Only fetch isochrones on explicit trigger (Go button or initial load)
+  useEffect(() => {
+    async function fetchIsochrones() {
+      const addressesWithCoords = isoAddresses.filter((a) => a.lat !== 0 && a.lng !== 0);
+      if (addressesWithCoords.length === 0) return;
+
+      setIsoLoading(true);
+      const results: typeof isoPolygons = [];
+      for (const addr of addressesWithCoords) {
+        try {
+          const res = await fetch('/api/housing/isochrone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: addr.lat, lng: addr.lng, minutes: addr.driveMinutes }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.polygon) {
+              results.push({ id: addr.id, color: addr.color, label: addr.label, polygon: data.polygon, driveMinutes: addr.driveMinutes });
+            }
+          }
+        } catch { /* skip failed */ }
+      }
+      setIsoPolygons(results);
+      setIsoLoading(false);
+    }
+    fetchIsochrones();
+  }, [isoFetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Compute intersection of all isochrone polygons
+  const isoIntersection = useMemo<[number, number][][] | undefined>(() => {
+    if (isoPolygons.length < 2) return undefined;
+    try {
+      function toTurfRing(polygon: [number, number][]) {
+        const coords = polygon.map((p) => [p[1], p[0]] as [number, number]);
+        if (coords.length > 0 && (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1])) {
+          coords.push([...coords[0]] as [number, number]);
+        }
+        return coords;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let result: any = turf.polygon([toTurfRing(isoPolygons[0].polygon)]);
+      for (let i = 1; i < isoPolygons.length; i++) {
+        const next = turf.polygon([toTurfRing(isoPolygons[i].polygon)]);
+        const inter = turf.intersect(turf.featureCollection([result, next]));
+        if (!inter) return undefined;
+        result = inter;
+      }
+
+      // Simplify the result to reduce rendering load
+      const simplified = turf.simplify(result, { tolerance: 0.002, highQuality: true });
+      const geom = simplified.geometry;
+      const rings: [number, number][][] = [];
+
+      if (geom.type === 'Polygon') {
+        const coords = geom.coordinates[0] as [number, number][];
+        rings.push(coords.map((c) => [c[1], c[0]] as [number, number]));
+      } else if (geom.type === 'MultiPolygon') {
+        for (const sub of geom.coordinates) {
+          const coords = sub[0] as [number, number][];
+          if (coords.length > 3) {
+            rings.push(coords.map((c) => [c[1], c[0]] as [number, number]));
+          }
+        }
+      }
+
+      return rings.length > 0 ? rings : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [isoPolygons]);
+
+  function triggerIsochroneFetch() {
+    setIsoLoading(true);
+    setIsoFetchTrigger((t) => t + 1);
+  }
 
   // Preferences
   const [budget, setBudget] = useState(550000);
@@ -200,6 +282,7 @@ export default function HousingPage() {
                 onCreditScoreChange={setCreditScore}
                 isochroneAddresses={isoAddresses}
                 onIsochroneAddressesChange={setIsoAddresses}
+                onIsochroneSubmit={triggerIsochroneFetch}
               />
             </div>
           )}
@@ -211,8 +294,17 @@ export default function HousingPage() {
             neighborhoods={neighborhoods}
             listings={listings}
             isochroneAddresses={isoAddresses}
+            isoPolygons={isoPolygons}
+            isoIntersection={isoIntersection}
             onListingClick={setSelectedListingId}
           />
+          {isoLoading && (
+            <div className="absolute inset-0 z-[2000] bg-background/70 flex items-center justify-center">
+              <div className="bg-surface-container border border-outline px-8 py-4 text-on-surface text-sm">
+                Please Wait...
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Panel */}

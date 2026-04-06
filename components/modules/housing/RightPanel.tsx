@@ -93,7 +93,7 @@ export default function RightPanel({
                     {TERM_LABELS[r.product] ?? r.product}
                   </span>
                   <span className={`font-mono text-base font-bold ${colors[i] ?? 'text-on-surface'}`}>
-                    {r.rate}%
+                    {r.rate.toFixed(3)}%
                   </span>
                 </div>
               );

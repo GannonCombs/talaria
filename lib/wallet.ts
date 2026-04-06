@@ -187,14 +187,33 @@ export async function getWalletBalance(): Promise<WalletInfo> {
 
   const { evmAddress, solanaAddress } = getStoredAddresses();
 
-  const evmBalances: ChainBalance[] = [
-    { chain: 'tempo', symbol: 'USDC', balance: 0, usdValue: 0 },
-    { chain: 'base', symbol: 'USDC', balance: 0, usdValue: 0 },
-  ];
+  // Query real on-chain balances
+  const evmBalances: ChainBalance[] = [];
+  const solanaBalances: ChainBalance[] = [];
 
-  const solanaBalances: ChainBalance[] = [
-    { chain: 'solana', symbol: 'SOL', balance: 0, usdValue: 0 },
-  ];
+  // Tempo USDC.e balance
+  const tempoUsdc = await queryErc20Balance(
+    'https://rpc.tempo.xyz',
+    '0x20C000000000000000000000b9537d11c60E8b50',
+    evmAddress,
+    6
+  );
+  evmBalances.push({ chain: 'tempo', symbol: 'USDC', balance: tempoUsdc, usdValue: tempoUsdc });
+
+  // Base USDC balance
+  const baseUsdc = await queryErc20Balance(
+    'https://mainnet.base.org',
+    '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    evmAddress,
+    6
+  );
+  evmBalances.push({ chain: 'base', symbol: 'USDC', balance: baseUsdc, usdValue: baseUsdc });
+
+  // Solana SOL balance (via public RPC)
+  const solBalance = await querySolBalance(solanaAddress);
+  solanaBalances.push({ chain: 'solana', symbol: 'SOL', balance: solBalance, usdValue: 0 });
+
+  const totalUsd = evmBalances.reduce((s, b) => s + b.usdValue, 0);
 
   return {
     exists: true,
@@ -202,9 +221,69 @@ export async function getWalletBalance(): Promise<WalletInfo> {
     evmAddressFull: evmAddress,
     solanaAddress: truncateAddress(solanaAddress),
     solanaAddressFull: solanaAddress,
-    totalUsd: 0,
+    totalUsd,
     evmBalances,
     solanaBalances,
     linkedAccounts: [],
   };
+}
+
+// ── On-chain balance queries ──
+
+async function queryErc20Balance(
+  rpcUrl: string,
+  tokenContract: string,
+  walletAddress: string,
+  decimals: number
+): Promise<number> {
+  try {
+    const paddedAddress = walletAddress.replace('0x', '').padStart(64, '0');
+    const data = '0x70a08231' + paddedAddress;
+
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_call',
+        params: [{ to: tokenContract, data }, 'latest'],
+        id: 1,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const json = await res.json();
+    if (json.result && json.result !== '0x') {
+      const raw = BigInt(json.result);
+      return Number(raw) / Math.pow(10, decimals);
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function querySolBalance(address: string): Promise<number> {
+  if (!address) return 0;
+  try {
+    const res = await fetch('https://api.mainnet-beta.solana.com', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'getBalance',
+        params: [address],
+        id: 1,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const json = await res.json();
+    if (json.result?.value) {
+      return json.result.value / 1e9;
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
 }

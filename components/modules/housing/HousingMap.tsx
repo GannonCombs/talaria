@@ -6,6 +6,7 @@ import {
   TileLayer,
   GeoJSON,
   CircleMarker,
+  Polygon,
   Tooltip,
   useMap,
 } from 'react-leaflet';
@@ -45,10 +46,20 @@ interface IsochroneAddress {
   color: string;
 }
 
+interface IsoPolygon {
+  id: string;
+  color: string;
+  label: string;
+  polygon: [number, number][];
+  driveMinutes?: number;
+}
+
 interface HousingMapProps {
   neighborhoods: NeighborhoodScore[];
   listings: ListingPin[];
   isochroneAddresses: IsochroneAddress[];
+  isoPolygons?: IsoPolygon[];
+  isoIntersection?: [number, number][][];
   onListingClick?: (id: number) => void;
 }
 
@@ -133,6 +144,8 @@ export default function HousingMap({
   neighborhoods,
   listings,
   isochroneAddresses,
+  isoPolygons = [],
+  isoIntersection,
   onListingClick,
 }: HousingMapProps) {
   const [showNeighborhoods, setShowNeighborhoods] = useState(true);
@@ -195,37 +208,81 @@ export default function HousingMap({
           <GeoJSON
             data={floodData}
             style={() => ({
-              color: '#f87171',
-              weight: 0.5,
-              fillColor: '#f87171',
-              fillOpacity: 0.25,
+              color: '#60a5fa',
+              weight: 1.5,
+              fillColor: '#3b82f6',
+              fillOpacity: 0.35,
             })}
           />
         )}
 
-        {/* Isochrone center dots + boundaries (driven by live addresses) */}
-        {showIsochrones && isochroneAddresses
-          .filter((a) => a.lat !== 0 && a.lng !== 0)
-          .map((addr) => (
-            <CircleMarker
-              key={addr.id}
-              center={[addr.lat, addr.lng]}
-              radius={6}
-              pathOptions={{
-                color: addr.color,
-                fillColor: addr.color,
-                fillOpacity: 1,
-                weight: 2,
-              }}
-            >
-              <Tooltip
-                className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none"
+        {/* Isochrone polygons + center dots */}
+        {showIsochrones && (
+          <>
+            {/* Drive-time boundary polygons */}
+            {isoPolygons.map((iso) => (
+              <Polygon
+                key={`poly-${iso.id}`}
+                positions={iso.polygon}
+                pathOptions={{
+                  color: iso.color,
+                  weight: 2,
+                  dashArray: '8 4',
+                  fillColor: iso.color,
+                  fillOpacity: 0.06,
+                }}
               >
-                {addr.label || 'Unnamed'}
-              </Tooltip>
-            </CircleMarker>
-          ))
-        }
+                <Tooltip
+                  className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none"
+                >
+                  {iso.label} — {iso.driveMinutes ?? 30} min
+                </Tooltip>
+              </Polygon>
+            ))}
+
+            {/* Intersection of all isochrones */}
+            {isoIntersection && isoIntersection.map((ring, i) => (
+              <Polygon
+                key={`intersection-${i}`}
+                positions={ring}
+                pathOptions={{
+                  color: '#ffffff',
+                  weight: 2,
+                  fillColor: '#ffffff',
+                  fillOpacity: 0.2,
+                }}
+              >
+                <Tooltip className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none">
+                  Overlap — reachable from all locations
+                </Tooltip>
+              </Polygon>
+            ))}
+
+            {/* Center dots */}
+            {isochroneAddresses
+              .filter((a) => a.lat !== 0 && a.lng !== 0)
+              .map((addr) => (
+                <CircleMarker
+                  key={`dot-${addr.id}`}
+                  center={[addr.lat, addr.lng]}
+                  radius={6}
+                  pathOptions={{
+                    color: addr.color,
+                    fillColor: addr.color,
+                    fillOpacity: 1,
+                    weight: 2,
+                  }}
+                >
+                  <Tooltip
+                    className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none"
+                  >
+                    {addr.label || 'Unnamed'}
+                  </Tooltip>
+                </CircleMarker>
+              ))
+            }
+          </>
+        )}
 
         {/* Listing pins */}
         {listings.map((listing) => (
