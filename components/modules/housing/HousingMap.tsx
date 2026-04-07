@@ -17,13 +17,6 @@ import {
   DEFAULT_ZOOM,
 } from '@/lib/modules/housing/geodata';
 
-interface NeighborhoodScore {
-  zip: string;
-  compositeScore: number;
-  medianPrice: number;
-  walkScore: number;
-}
-
 interface ListingPin {
   id: number;
   address: string;
@@ -55,7 +48,6 @@ interface IsoPolygon {
 }
 
 interface HousingMapProps {
-  neighborhoods: NeighborhoodScore[];
   listings: ListingPin[];
   isochroneAddresses: IsochroneAddress[];
   isoPolygons?: IsoPolygon[];
@@ -69,12 +61,9 @@ interface HousingMapProps {
 //   PIN_COLOR_SKY  — sky-400. Cooler, more distinct from isochrones, but
 //                    shades closer to the (future) flood-zone overlay blue.
 const PIN_COLOR_TEAL = '#46f1c5';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Kept on user request as a quick swap target.
 const PIN_COLOR_SKY = '#38bdf8';
 const PIN_COLOR = PIN_COLOR_TEAL;
-
-function getPinColor(_dealScore: number | null): string {
-  return PIN_COLOR;
-}
 
 function getPinRadius(dealScore: number | null): number {
   if (dealScore === null) return 6;
@@ -148,7 +137,6 @@ function tractStyle(): Record<string, unknown> {
 }
 
 export default function HousingMap({
-  neighborhoods,
   listings,
   isochroneAddresses,
   isoPolygons = [],
@@ -299,7 +287,7 @@ export default function HousingMap({
             radius={getPinRadius(listing.dealScore)}
             pathOptions={{
               color: '#0d1117',
-              fillColor: getPinColor(listing.dealScore),
+              fillColor: PIN_COLOR,
               fillOpacity: 0.95,
               weight: 1.5,
             }}

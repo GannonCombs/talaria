@@ -34,7 +34,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <TopBar />
         <Sidebar />
-        <main className="ml-16 mt-14 min-h-screen bg-background p-8">
+        <main className="ml-16 mt-14 min-h-[calc(100vh-3.5rem)] bg-background p-8">
           {children}
         </main>
       </body>

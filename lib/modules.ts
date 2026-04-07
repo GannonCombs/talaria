@@ -66,23 +66,10 @@ registerModule({
     return getHousingDashboardMetrics();
   },
   getTables: () => [HOUSING_TABLES_SQL],
-  getSettingsFields: () => [
-    { key: 'budget', label: 'Budget', type: 'number', prefix: '$', defaultValue: '550000' },
-    { key: 'down_payment_pct', label: 'Down Payment', type: 'number', suffix: '%', defaultValue: '20' },
-    { key: 'loan_term_years', label: 'Loan Term', type: 'number', suffix: 'years', defaultValue: '30' },
-    {
-      key: 'credit_score_tier',
-      label: 'Credit Score Tier',
-      type: 'select',
-      defaultValue: 'excellent',
-      options: [
-        { value: 'excellent', label: 'Excellent (740+)' },
-        { value: 'good', label: 'Good (670-739)' },
-        { value: 'fair', label: 'Fair (580-669)' },
-        { value: 'poor', label: 'Poor (<580)' },
-      ],
-    },
-  ],
+  // Module config (down payment, credit score, city/state, scoring weights)
+  // lives inside the housing module's own Budget & Loan panel — not in
+  // global Settings. Settings only owns app-level concerns (spend
+  // controls, data, module on/off).
 });
 
 registerModule({

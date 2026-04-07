@@ -56,11 +56,16 @@ export default function RightPanel({
   onListingClick,
 }: RightPanelProps) {
   const [priceHistory, setPriceHistory] = useState<{ date: string; value: number }[]>([]);
+  const [pmmsHistory, setPmmsHistory] = useState<{ date: string; value: number }[]>([]);
 
   useEffect(() => {
     fetch('/austin-zhvi.json')
       .then((r) => r.json())
       .then(setPriceHistory)
+      .catch(() => {});
+    fetch('/us-30yr-pmms.json')
+      .then((r) => r.json())
+      .then(setPmmsHistory)
       .catch(() => {});
   }, []);
 
@@ -98,6 +103,44 @@ export default function RightPanel({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* US 30yr PMMS sparkline (national average, 52 weeks) */}
+        {pmmsHistory.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-outline/50">
+            <div className="flex justify-between items-baseline mb-1">
+              <span className="text-[10px] text-on-surface-variant uppercase tracking-wider">
+                US 30yr Avg
+              </span>
+              <span className="font-mono text-xs text-on-surface-variant">
+                {pmmsHistory[pmmsHistory.length - 1].value.toFixed(2)}%
+              </span>
+            </div>
+            <div className="h-16">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                <AreaChart data={pmmsHistory}>
+                  <defs>
+                    <linearGradient id="pmmsGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#46f1c5" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#46f1c5" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="date" hide />
+                  <YAxis hide domain={['dataMin - 0.1', 'dataMax + 0.1']} />
+                  <Tooltip
+                    contentStyle={{ background: '#1c2026', border: '1px solid #30363d', borderRadius: 0, fontSize: 11 }}
+                    labelStyle={{ color: '#8b949e' }}
+                    formatter={(v) => [`${Number(v).toFixed(2)}%`, '30yr']}
+                    labelFormatter={(d) => String(d)}
+                  />
+                  <Area type="monotone" dataKey="value" stroke="#46f1c5" strokeWidth={1.5} fill="url(#pmmsGrad)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="text-[10px] text-on-surface-variant font-mono mt-1">
+              Freddie Mac PMMS · 52wk
+            </div>
           </div>
         )}
       </section>
@@ -218,7 +261,7 @@ export default function RightPanel({
           </div>
         ) : (
           <div className="space-y-3">
-            {topListings.slice(0, 3).map((listing) => (
+            {topListings.slice(0, 10).map((listing) => (
               <button
                 key={listing.id}
                 onClick={() => onListingClick?.(listing.id)}

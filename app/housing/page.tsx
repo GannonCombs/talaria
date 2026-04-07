@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import * as turf from '@turf/turf';
@@ -65,8 +65,20 @@ interface Filters {
   priceMin: number;
   priceMax: number;
   minBeds: number;
+  minBaths: number;
   minSqft: number;
+  // Multi-select. Empty array = no filter (all types). Values match the
+  // RentCast `propertyType` strings stored in metadata: "Single Family",
+  // "Condo", "Townhouse", "Multi-Family", "Land", "Manufactured".
+  propertyTypes: string[];
+  bookmarksOnly: boolean;
+  // More Options
   maxDom: number;
+  yearMin: number;
+  yearMax: number;
+  minLotSqft: number;
+  maxHoa: number;
+  hasHoa: 'any' | 'yes' | 'no';
 }
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
@@ -81,11 +93,35 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
 
 const TARGET_ZIPS = ['78745', '78704', '78749', '78748', '78731'];
 
+// Map legacy "tier" strings to numeric credit scores so any existing
+// `housing.credit_score_tier` pref from the old string-dropdown migrates
+// cleanly to the numeric `housing.credit_score`.
+const TIER_TO_SCORE: Record<string, number> = {
+  excellent: 780,
+  good: 740,
+  fair: 700,
+  poor: 660,
+};
+
 export default function HousingPage() {
   const [neighborhoods, setNeighborhoods] = useState<NeighborhoodScore[]>([]);
   const [listings, setListings] = useState<ListingData[]>([]);
   const [weights, setWeights] = useState<ScoringWeights>(DEFAULT_WEIGHTS);
-  const [filters, setFilters] = useState<Filters>({ priceMin: 0, priceMax: 0, minBeds: 0, minSqft: 0, maxDom: 0 });
+  const [filters, setFilters] = useState<Filters>({
+    priceMin: 0,
+    priceMax: 0,
+    minBeds: 0,
+    minBaths: 0,
+    minSqft: 0,
+    propertyTypes: [],
+    bookmarksOnly: false,
+    maxDom: 0,
+    yearMin: 0,
+    yearMax: 0,
+    minLotSqft: 0,
+    maxHoa: 0,
+    hasHoa: 'any',
+  });
   const [rates, setRates] = useState<RateData[]>([]);
   const [prediction, setPrediction] = useState<FedPrediction | null>(null);
   const [selectedListingId, setSelectedListingId] = useState<number | null>(null);
@@ -176,18 +212,27 @@ export default function HousingPage() {
     setIsoFetchTrigger((t) => t + 1);
   }
 
-  // Preferences
-  const [budget, setBudget] = useState(550000);
+  // Housing-module preferences
   const [downPaymentPct, setDownPaymentPct] = useState(20);
-  const [creditScore, setCreditScore] = useState('excellent');
+  const [creditScore, setCreditScore] = useState(780);
+  const [city, setCity] = useState('Austin');
+  const [stateCode, setStateCode] = useState('TX');
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/preferences')
       .then((r) => r.json())
       .then((prefs) => {
-        if (prefs['housing.budget']) setBudget(Number(prefs['housing.budget']));
         if (prefs['housing.down_payment_pct']) setDownPaymentPct(Number(prefs['housing.down_payment_pct']));
-        if (prefs['housing.credit_score_tier']) setCreditScore(prefs['housing.credit_score_tier']);
+        if (prefs['housing.credit_score']) {
+          setCreditScore(Number(prefs['housing.credit_score']));
+        } else if (prefs['housing.credit_score_tier']) {
+          // Legacy: migrate string tier → number on first read.
+          const mapped = TIER_TO_SCORE[prefs['housing.credit_score_tier']] ?? 780;
+          setCreditScore(mapped);
+        }
+        if (prefs['housing.city']) setCity(prefs['housing.city']);
+        if (prefs['housing.state']) setStateCode(prefs['housing.state']);
         if (prefs['housing.scoring_weights']) {
           try { setWeights(JSON.parse(prefs['housing.scoring_weights'])); } catch { /* defaults */ }
         }
@@ -195,36 +240,107 @@ export default function HousingPage() {
       .catch(() => {});
   }, []);
 
-  const loadData = useCallback(async () => {
-    const scoresRes = await fetch('/api/housing/scores');
-    if (scoresRes.ok) setNeighborhoods(await scoresRes.json());
+  // Persist housing prefs whenever they change.
+  async function savePref(key: string, value: string | number) {
+    await fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: String(value) }),
+    });
+  }
 
+  // Refresh Bankrate rates with the user's current Budget & Loan values.
+  // Bankrate is free (no MPP), so this is safe to invoke from a button
+  // without spend gating. Defaults the home value to Austin median ($540k)
+  // since we don't have a specific listing context here.
+  async function refreshRates() {
+    const homeValue = 540000;
+    const downPayment = Math.round((homeValue * downPaymentPct) / 100);
+    const params = new URLSearchParams({
+      refresh: 'true',
+      purchasePrice: String(homeValue),
+      downPayment: String(downPayment),
+      creditScore: String(creditScore),
+      zipCode: '78757',
+    });
+    const res = await fetch(`/api/housing/rates?${params}`);
+    if (res.ok) {
+      const r = await res.json();
+      if (Array.isArray(r)) setRates(r);
+      setRatesUpdatedAt(new Date().toISOString());
+    }
+  }
+
+  // Build the listings query params from current filters. Used by both
+  // the per-zip loop and the single zipless bookmarks call.
+  function buildFilterParams(): URLSearchParams {
+    const params = new URLSearchParams();
+    if (filters.priceMin) params.set('minPrice', String(filters.priceMin));
+    if (filters.priceMax) params.set('maxPrice', String(filters.priceMax));
+    if (filters.minBeds) params.set('minBeds', String(filters.minBeds));
+    if (filters.minBaths) params.set('minBaths', String(filters.minBaths));
+    if (filters.minSqft) params.set('minSqft', String(filters.minSqft));
+    if (filters.maxDom) params.set('maxDom', String(filters.maxDom));
+    if (filters.yearMin) params.set('yearMin', String(filters.yearMin));
+    if (filters.yearMax) params.set('yearMax', String(filters.yearMax));
+    if (filters.minLotSqft) params.set('minLotSqft', String(filters.minLotSqft));
+    if (filters.maxHoa) params.set('maxHoa', String(filters.maxHoa));
+    if (filters.hasHoa !== 'any') params.set('hasHoa', filters.hasHoa);
+    if (filters.propertyTypes.length > 0) params.set('propertyTypes', filters.propertyTypes.join(','));
+    return params;
+  }
+
+  // Listings: re-runs whenever filters change. When bookmarksOnly is on,
+  // we issue a SINGLE zipless request so bookmarks across any zip are
+  // visible — not just bookmarks that happen to fall in TARGET_ZIPS.
+  const loadListings = useCallback(async () => {
+    if (filters.bookmarksOnly) {
+      const params = buildFilterParams();
+      params.set('bookmarksOnly', 'true');
+      const res = await fetch(`/api/housing/listings?${params}`);
+      if (res.ok) setListings(await res.json());
+      return;
+    }
     const allListings: ListingData[] = [];
     for (const zip of TARGET_ZIPS) {
-      const params = new URLSearchParams({ zip });
-      if (filters.priceMin) params.set('minPrice', String(filters.priceMin));
-      if (filters.priceMax) params.set('maxPrice', String(filters.priceMax));
-      if (filters.minBeds) params.set('minBeds', String(filters.minBeds));
-      if (filters.minSqft) params.set('minSqft', String(filters.minSqft));
-      if (filters.maxDom) params.set('maxDom', String(filters.maxDom));
+      const params = buildFilterParams();
+      params.set('zip', zip);
       const res = await fetch(`/api/housing/listings?${params}`);
       if (res.ok) allListings.push(...(await res.json()));
     }
     setListings(allListings);
-
-    const rateRes = await fetch('/api/housing/rates?refresh=true');
-    if (rateRes.ok) {
-      const r = await rateRes.json();
-      if (Array.isArray(r)) setRates(r);
-    }
-
-    const predRes = await fetch('/api/housing/predictions');
-    if (predRes.ok) setPrediction(await predRes.json());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadListings();
+  }, [loadListings]);
+
+  // Static-ish data: scores + predictions. Loaded once on mount.
+  // Doesn't need to re-run when filters change.
+  useEffect(() => {
+    fetch('/api/housing/scores')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setNeighborhoods(data); })
+      .catch(() => {});
+    fetch('/api/housing/predictions')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setPrediction(data); })
+      .catch(() => {});
+  }, []);
+
+  // Initial rates load: fires once after prefs have loaded so the first
+  // Bankrate call uses the user's actual credit score (not the API's
+  // default of 780). Subsequent rate refreshes happen via the Apply
+  // button in Budget & Loan, never automatically.
+  const ratesLoadedRef = useRef(false);
+  useEffect(() => {
+    if (ratesLoadedRef.current) return;
+    if (creditScore === 0) return; // prefs haven't loaded yet
+    ratesLoadedRef.current = true;
+    refreshRates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditScore]);
 
   const selectedListing = listings.find((l) => l.id === selectedListingId) ?? null;
   const selectedNeighborhood = selectedListing
@@ -239,10 +355,10 @@ export default function HousingPage() {
   const topListings = [...listings]
     .filter((l) => l.sqft != null && l.sqft > 0 && l.price > 0)
     .sort((a, b) => a.price / a.sqft - b.price / b.sqft)
-    .slice(0, 3);
+    .slice(0, 10);
 
   return (
-    <div className="h-[calc(100vh-3.5rem-2rem)] flex flex-col">
+    <div className="h-[calc(100vh-3.5rem-4rem)] flex flex-col">
       {/* Top Bar */}
       <div className="relative flex items-center px-4 py-2 border-b border-outline shrink-0">
         <div className="flex items-center gap-3">
@@ -290,12 +406,14 @@ export default function HousingPage() {
                 onFiltersChange={setFilters}
                 weights={weights}
                 onWeightsChange={setWeights}
-                budget={budget}
-                downPaymentPct={downPaymentPct}
                 creditScore={creditScore}
-                onBudgetChange={setBudget}
-                onDownPaymentChange={setDownPaymentPct}
-                onCreditScoreChange={setCreditScore}
+                city={city}
+                stateCode={stateCode}
+                ratesUpdatedAt={ratesUpdatedAt}
+                onCreditScoreChange={(v) => { setCreditScore(v); savePref('housing.credit_score', v); }}
+                onCityChange={(v) => { setCity(v); savePref('housing.city', v); }}
+                onStateChange={(v) => { setStateCode(v); savePref('housing.state', v); }}
+                onRefreshRates={refreshRates}
                 isochroneAddresses={isoAddresses}
                 onIsochroneAddressesChange={setIsoAddresses}
                 onIsochroneSubmit={triggerIsochroneFetch}
@@ -307,7 +425,6 @@ export default function HousingPage() {
         {/* Map */}
         <div className="relative overflow-hidden">
           <HousingMap
-            neighborhoods={neighborhoods}
             listings={listings}
             isochroneAddresses={isoAddresses}
             isoPolygons={isoPolygons}

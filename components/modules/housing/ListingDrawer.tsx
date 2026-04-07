@@ -7,7 +7,6 @@ import {
   Bookmark,
   Calendar,
   Ruler,
-  DollarSign,
 } from 'lucide-react';
 import { calculateMortgage } from '@/lib/modules/housing/mortgage';
 
@@ -65,13 +64,18 @@ export default function ListingDrawer({
 }: ListingDrawerProps) {
   const [tracked, setTracked] = useState(false);
   const [selectedTerm, setSelectedTerm] = useState('30yr_fixed');
-  const [hoaOverride, setHoaOverride] = useState<number | null>(null);
-  const [insuranceOverride, setInsuranceOverride] = useState<number | null>(null);
-  const [editingHoa, setEditingHoa] = useState(false);
-  const [editingInsurance, setEditingInsurance] = useState(false);
+  const [downPaymentOverride, setDownPaymentOverride] = useState<number | null>(null);
+  const [editingDownPayment, setEditingDownPayment] = useState(false);
+  const [downPaymentDraft, setDownPaymentDraft] = useState('');
 
-  const effectiveHoa = hoaOverride ?? listing.hoaMonthly;
-  const effectiveInsurance = insuranceOverride ?? listing.price * 0.006;
+  // HOA and Insurance are intrinsic to the listing and don't change between
+  // calculator runs. HOA comes from the listing data; insurance is a flat
+  // 0.6% of home value (industry rule of thumb).
+  const effectiveHoa = listing.hoaMonthly;
+  const effectiveInsurance = listing.price * 0.006;
+  // Down payment % uses the user's profile default until they override it
+  // for this specific listing. Override is per-drawer-instance, not persisted.
+  const effectiveDownPaymentPct = downPaymentOverride ?? downPaymentPct;
 
   // Find best rate for selected term
   const bestRates = new Map<string, number>();
@@ -86,7 +90,7 @@ export default function ListingDrawer({
 
   const mortgage = calculateMortgage({
     homePrice: listing.price,
-    downPaymentPct,
+    downPaymentPct: effectiveDownPaymentPct,
     interestRate: termRate,
     loanTermYears: termConfig.years,
     annualPropertyTax: listing.taxAnnual,
@@ -223,26 +227,68 @@ export default function ListingDrawer({
 
           {/* Breakdown */}
           <div className="space-y-2">
+            {/* Down Payment row — only editable input in the breakdown.
+                Click the value to swap to inline %, Enter or OK to commit,
+                Esc or X to cancel. Recomputes everything below instantly. */}
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-on-surface-variant">Down Payment</span>
+              {editingDownPayment ? (
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={downPaymentDraft}
+                    onChange={(e) => setDownPaymentDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const n = Number(downPaymentDraft);
+                        if (Number.isFinite(n) && n >= 0 && n <= 100) {
+                          setDownPaymentOverride(n);
+                        }
+                        setEditingDownPayment(false);
+                      } else if (e.key === 'Escape') {
+                        setEditingDownPayment(false);
+                      }
+                    }}
+                    className="w-12 bg-surface-container-lowest border border-primary text-xs px-1 py-0.5 text-on-surface font-mono focus:outline-none text-right"
+                    autoFocus
+                  />
+                  <span className="text-on-surface-variant">%</span>
+                  <button
+                    onClick={() => {
+                      const n = Number(downPaymentDraft);
+                      if (Number.isFinite(n) && n >= 0 && n <= 100) {
+                        setDownPaymentOverride(n);
+                      }
+                      setEditingDownPayment(false);
+                    }}
+                    className="text-primary text-xs font-bold ml-1"
+                  >
+                    OK
+                  </button>
+                  <button
+                    onClick={() => setEditingDownPayment(false)}
+                    className="text-on-surface-variant text-xs"
+                  >
+                    X
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    setDownPaymentDraft(String(effectiveDownPaymentPct));
+                    setEditingDownPayment(true);
+                  }}
+                  className="font-mono text-on-surface hover:text-primary"
+                  title="Click to edit"
+                >
+                  ${(listing.price * effectiveDownPaymentPct / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({effectiveDownPaymentPct}%)
+                </button>
+              )}
+            </div>
             <CostRow label="Principal & Interest" value={mortgage.principal_interest} />
             <CostRow label="Property Tax" value={mortgage.property_tax} />
-            <CostRow
-              label="Insurance"
-              value={mortgage.insurance}
-              editable
-              editing={editingInsurance}
-              onEdit={() => setEditingInsurance(true)}
-              onSave={(v) => { setInsuranceOverride(v * 12); setEditingInsurance(false); }}
-              onCancel={() => setEditingInsurance(false)}
-            />
-            <CostRow
-              label="HOA"
-              value={mortgage.hoa}
-              editable
-              editing={editingHoa}
-              onEdit={() => setEditingHoa(true)}
-              onSave={(v) => { setHoaOverride(v); setEditingHoa(false); }}
-              onCancel={() => setEditingHoa(false)}
-            />
+            <CostRow label="Insurance" value={mortgage.insurance} />
+            <CostRow label="HOA" value={mortgage.hoa} />
             {mortgage.pmi > 0 && <CostRow label="PMI" value={mortgage.pmi} />}
             <div className="border-t border-outline pt-2 flex justify-between font-bold">
               <span className="text-sm text-on-surface">Total Monthly</span>
@@ -250,10 +296,6 @@ export default function ListingDrawer({
                 ${mortgage.total_monthly.toLocaleString()}
               </span>
             </div>
-          </div>
-
-          <div className="text-xs text-on-surface-variant font-mono mt-3">
-            Down payment: ${(listing.price * downPaymentPct / 100).toLocaleString()} ({downPaymentPct}%)
           </div>
         </div>
 
@@ -273,10 +315,9 @@ export default function ListingDrawer({
       </div>
 
       {/* Action buttons. Both share the same outlined-with-teal-hover
-          treatment used by the dashboard module cards. Track conveys state
-          via icon fill (empty bookmark → filled bookmark) instead of color
-          inversion, which kept the previous "white text on teal bg" being
-          unreadable on hover. */}
+          treatment used by the dashboard module cards. Bookmark conveys
+          state via icon fill (empty bookmark → filled bookmark) instead of
+          color inversion. */}
       <div className="shrink-0 p-4 border-t border-outline bg-surface-container-low flex gap-2">
         <a
           // listing.address already includes the zip ("...Austin, TX 78745").
@@ -292,7 +333,7 @@ export default function ListingDrawer({
         <button
           onClick={toggleTrack}
           aria-pressed={tracked}
-          aria-label={tracked ? 'Untrack this listing' : 'Track this listing'}
+          aria-label={tracked ? 'Remove bookmark' : 'Bookmark this listing'}
           className={`flex-1 h-9 border text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 hover:shadow-[inset_0_0_0_2px_#46f1c5,0_0_12px_rgba(70,241,197,0.15)] hover:text-primary ${
             tracked
               ? 'border-primary text-primary'
@@ -300,63 +341,18 @@ export default function ListingDrawer({
           }`}
         >
           <Bookmark size={12} fill={tracked ? 'currentColor' : 'none'} />
-          {tracked ? 'Tracked' : 'Track'}
+          {tracked ? 'Bookmarked' : 'Bookmark'}
         </button>
       </div>
     </div>
   );
 }
 
-function CostRow({
-  label,
-  value,
-  editable,
-  editing,
-  onEdit,
-  onSave,
-  onCancel,
-}: {
-  label: string;
-  value: number;
-  editable?: boolean;
-  editing?: boolean;
-  onEdit?: () => void;
-  onSave?: (v: number) => void;
-  onCancel?: () => void;
-}) {
-  const [editValue, setEditValue] = useState(String(Math.round(value)));
-
-  if (editing && onSave && onCancel) {
-    return (
-      <div className="flex justify-between items-center text-sm">
-        <span className="text-on-surface-variant">{label}</span>
-        <div className="flex items-center gap-1">
-          <span className="text-on-surface-variant">$</span>
-          <input
-            type="number"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            className="w-16 bg-surface-container-lowest border border-primary text-xs px-1 py-0.5 text-on-surface font-mono focus:outline-none"
-            autoFocus
-          />
-          <button onClick={() => onSave(Number(editValue))} className="text-primary text-xs font-bold">OK</button>
-          <button onClick={onCancel} className="text-on-surface-variant text-xs">X</button>
-        </div>
-      </div>
-    );
-  }
-
+function CostRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex justify-between items-center text-sm">
       <span className="text-on-surface-variant">{label}</span>
-      <div className="flex items-center gap-1">
-        <span className="font-mono text-on-surface">${value.toFixed(2)}</span>
-        {editable && onEdit && (
-          <button onClick={onEdit} className="text-on-surface-variant hover:text-primary">
-            <DollarSign size={10} />
-          </button>
-        )}
-      </div>
+      <span className="font-mono text-on-surface">${value.toFixed(2)}</span>
     </div>
   );
 }

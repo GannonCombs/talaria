@@ -1,16 +1,35 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bookmark, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2 } from 'lucide-react';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
+import { formatRelativeFromNow } from '@/lib/time';
 
 interface Filters {
   priceMin: number;
   priceMax: number;
   minBeds: number;
+  minBaths: number;
   minSqft: number;
+  propertyTypes: string[];
+  bookmarksOnly: boolean;
+  // More Options
   maxDom: number;
+  yearMin: number;
+  yearMax: number;
+  minLotSqft: number;
+  maxHoa: number;
+  hasHoa: 'any' | 'yes' | 'no';
 }
+
+const PROPERTY_TYPES = [
+  'Single Family',
+  'Condo',
+  'Townhouse',
+  'Multi-Family',
+  'Land',
+  'Manufactured',
+] as const;
 
 export interface IsochroneAddress {
   id: string;
@@ -27,12 +46,16 @@ interface LeftPanelProps {
   onFiltersChange: (f: Filters) => void;
   weights: ScoringWeights;
   onWeightsChange: (w: ScoringWeights) => void;
-  budget: number;
-  downPaymentPct: number;
-  creditScore: string;
-  onBudgetChange: (v: number) => void;
-  onDownPaymentChange: (v: number) => void;
-  onCreditScoreChange: (v: string) => void;
+  // Budget & Loan
+  creditScore: number;
+  city: string;
+  stateCode: string;
+  ratesUpdatedAt: string | null;
+  onCreditScoreChange: (v: number) => void;
+  onCityChange: (v: string) => void;
+  onStateChange: (v: string) => void;
+  onRefreshRates: () => void;
+  // Isochrones
   isochroneAddresses: IsochroneAddress[];
   onIsochroneAddressesChange: (addrs: IsochroneAddress[]) => void;
   onIsochroneSubmit: () => void;
@@ -75,12 +98,14 @@ export default function LeftPanel({
   onFiltersChange,
   weights,
   onWeightsChange,
-  budget,
-  downPaymentPct,
   creditScore,
-  onBudgetChange,
-  onDownPaymentChange,
+  city,
+  stateCode,
+  ratesUpdatedAt,
   onCreditScoreChange,
+  onCityChange,
+  onStateChange,
+  onRefreshRates,
   isochroneAddresses,
   onIsochroneAddressesChange,
   onIsochroneSubmit,
@@ -105,8 +130,17 @@ export default function LeftPanel({
     draftFilters.priceMin !== filters.priceMin ||
     draftFilters.priceMax !== filters.priceMax ||
     draftFilters.minBeds !== filters.minBeds ||
+    draftFilters.minBaths !== filters.minBaths ||
     draftFilters.minSqft !== filters.minSqft ||
-    draftFilters.maxDom !== filters.maxDom;
+    draftFilters.maxDom !== filters.maxDom ||
+    draftFilters.yearMin !== filters.yearMin ||
+    draftFilters.yearMax !== filters.yearMax ||
+    draftFilters.minLotSqft !== filters.minLotSqft ||
+    draftFilters.maxHoa !== filters.maxHoa ||
+    draftFilters.hasHoa !== filters.hasHoa ||
+    draftFilters.bookmarksOnly !== filters.bookmarksOnly ||
+    draftFilters.propertyTypes.length !== filters.propertyTypes.length ||
+    draftFilters.propertyTypes.some((t, i) => t !== filters.propertyTypes[i]);
 
   function updateDraft<K extends keyof Filters>(key: K, value: Filters[K]) {
     setDraftFilters({ ...draftFilters, [key]: value });
@@ -268,6 +302,9 @@ export default function LeftPanel({
 
   // ── Section: Budget & Loan ──
   if (section === 'budget') {
+    const updatedLabel = ratesUpdatedAt
+      ? `Updated ${formatRelativeFromNow(ratesUpdatedAt)}`
+      : 'Rates not refreshed yet';
     return (
       <div className="h-full overflow-y-auto border-r border-outline bg-background p-4">
         <button onClick={() => setSection('menu')} className="flex items-center gap-2 text-on-surface-variant hover:text-on-surface mb-4">
@@ -277,41 +314,58 @@ export default function LeftPanel({
         <h3 className="section-header text-xs text-on-surface mb-4">Budget & Loan</h3>
         <div className="space-y-4">
           <div>
-            <label className="section-header text-xs text-on-surface-variant block mb-1">Budget</label>
-            <div className="flex items-center gap-1">
-              <span className="text-on-surface-variant text-sm">$</span>
-              <input
-                type="number"
-                value={budget}
-                onChange={(e) => onBudgetChange(Number(e.target.value))}
-                className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="section-header text-xs text-on-surface-variant block mb-1">Down Payment</label>
-            <div className="flex items-center gap-1">
-              <input
-                type="number"
-                value={downPaymentPct}
-                onChange={(e) => onDownPaymentChange(Number(e.target.value))}
-                className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none"
-              />
-              <span className="text-on-surface-variant text-sm">%</span>
-            </div>
-          </div>
-          <div>
             <label className="section-header text-xs text-on-surface-variant block mb-1">Credit Score</label>
             <select
               value={creditScore}
-              onChange={(e) => onCreditScoreChange(e.target.value)}
+              onChange={(e) => onCreditScoreChange(Number(e.target.value))}
               className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none"
             >
-              <option value="excellent">780+ (Excellent)</option>
-              <option value="good">740-779 (Good)</option>
-              <option value="fair">670-739 (Fair)</option>
-              <option value="poor">580-669 (Poor)</option>
+              <option value={780}>780+ (Excellent)</option>
+              <option value={740}>740–779 (Very Good)</option>
+              <option value={700}>700–739 (Good)</option>
+              <option value={660}>660–699 (Fair)</option>
+              <option value={620}>620–659 (Poor)</option>
             </select>
+            <div className="text-[10px] text-on-surface-variant mt-1">
+              Used for Bankrate rate lookup. Down payment % is per-listing — set it in the listing detail.
+            </div>
+          </div>
+
+          <div className="h-px bg-outline/50 my-2" />
+
+          {/* Search Area: city + state. Drives the housing module's
+              default location for any feature that wants one. */}
+          <div>
+            <label className="section-header text-xs text-on-surface-variant block mb-1">Search Area</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="City"
+                value={city}
+                onChange={(e) => onCityChange(e.target.value)}
+                className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+              />
+              <input
+                type="text"
+                placeholder="ST"
+                maxLength={2}
+                value={stateCode}
+                onChange={(e) => onStateChange(e.target.value.toUpperCase())}
+                className="w-14 bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+              />
+            </div>
+          </div>
+
+          <div className="h-px bg-outline/50 my-2" />
+
+          <button
+            onClick={onRefreshRates}
+            className="w-full h-9 text-xs font-bold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-on-primary"
+          >
+            Apply
+          </button>
+          <div className="text-[10px] text-on-surface-variant text-center font-mono">
+            {updatedLabel}
           </div>
         </div>
       </div>
@@ -324,6 +378,34 @@ export default function LeftPanel({
       {/* Filters */}
       <div className="space-y-4 mb-5">
         <h3 className="section-header text-xs text-on-surface-variant">Filters</h3>
+
+        {/* Property Type — multi-select chips */}
+        <div>
+          <label className="section-header text-xs text-on-surface-variant block mb-2">Property Type</label>
+          <div className="flex flex-wrap gap-1.5">
+            {PROPERTY_TYPES.map((type) => {
+              const active = draftFilters.propertyTypes.includes(type);
+              return (
+                <button
+                  key={type}
+                  onClick={() => {
+                    const next = active
+                      ? draftFilters.propertyTypes.filter((t) => t !== type)
+                      : [...draftFilters.propertyTypes, type];
+                    updateDraft('propertyTypes', next);
+                  }}
+                  className={`text-[11px] font-mono px-2 py-1 border ${
+                    active
+                      ? 'border-primary text-primary bg-primary/10'
+                      : 'border-outline text-on-surface-variant hover:border-on-surface-variant'
+                  }`}
+                >
+                  {type}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Price Range */}
         <div>
@@ -349,7 +431,7 @@ export default function LeftPanel({
           </div>
         </div>
 
-        {/* Beds + Sqft */}
+        {/* Beds + Baths */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="section-header text-xs text-on-surface-variant block mb-1">Beds</label>
@@ -365,17 +447,48 @@ export default function LeftPanel({
             </select>
           </div>
           <div>
-            <label className="section-header text-xs text-on-surface-variant block mb-1">Min Sqft</label>
-            <input
-              type="number"
-              placeholder="Any"
-              value={draftFilters.minSqft || ''}
-              onChange={(e) => updateDraft('minSqft', Number(e.target.value))}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
-              className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
-            />
+            <label className="section-header text-xs text-on-surface-variant block mb-1">Baths</label>
+            <select
+              value={draftFilters.minBaths}
+              onChange={(e) => updateDraft('minBaths', Number(e.target.value))}
+              className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none"
+            >
+              <option value={0}>Any</option>
+              <option value={1}>1+</option>
+              <option value={2}>2+</option>
+              <option value={3}>3+</option>
+              <option value={4}>4+</option>
+            </select>
           </div>
         </div>
+
+        {/* Min Sqft */}
+        <div>
+          <label className="section-header text-xs text-on-surface-variant block mb-1">Min Sqft</label>
+          <input
+            type="number"
+            placeholder="Any"
+            value={draftFilters.minSqft || ''}
+            onChange={(e) => updateDraft('minSqft', Number(e.target.value))}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
+            className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+          />
+        </div>
+
+        {/* Bookmarks toggle */}
+        <button
+          onClick={() => updateDraft('bookmarksOnly', !draftFilters.bookmarksOnly)}
+          className={`w-full flex items-center justify-between px-3 py-2 border text-xs font-mono ${
+            draftFilters.bookmarksOnly
+              ? 'border-primary text-primary bg-primary/10'
+              : 'border-outline text-on-surface-variant hover:border-on-surface-variant'
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <Bookmark size={12} fill={draftFilters.bookmarksOnly ? 'currentColor' : 'none'} />
+            Only bookmarked
+          </span>
+        </button>
 
         {/* More Options */}
         <button
@@ -386,6 +499,69 @@ export default function LeftPanel({
         </button>
         {moreOptions && (
           <div className="space-y-3 border-t border-outline/30 pt-3">
+            {/* Year Built */}
+            <div>
+              <label className="section-header text-xs text-on-surface-variant block mb-1">Year Built</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={draftFilters.yearMin || ''}
+                  onChange={(e) => updateDraft('yearMin', Number(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
+                  className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+                />
+                <span className="text-on-surface-variant text-sm">–</span>
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={draftFilters.yearMax || ''}
+                  onChange={(e) => updateDraft('yearMax', Number(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
+                  className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+                />
+              </div>
+            </div>
+
+            {/* Min Lot Size */}
+            <div>
+              <label className="section-header text-xs text-on-surface-variant block mb-1">Min Lot (sqft)</label>
+              <input
+                type="number"
+                placeholder="Any"
+                value={draftFilters.minLotSqft || ''}
+                onChange={(e) => updateDraft('minLotSqft', Number(e.target.value))}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
+                className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
+              />
+            </div>
+
+            {/* HOA: max + presence */}
+            <div>
+              <label className="section-header text-xs text-on-surface-variant block mb-1">HOA</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Max $/mo"
+                  value={draftFilters.maxHoa || ''}
+                  onChange={(e) => updateDraft('maxHoa', Number(e.target.value))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
+                  disabled={draftFilters.hasHoa === 'no'}
+                  className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant disabled:opacity-40"
+                />
+                <select
+                  value={draftFilters.hasHoa}
+                  onChange={(e) => updateDraft('hasHoa', e.target.value as Filters['hasHoa'])}
+                  className="bg-surface-container-lowest border border-outline text-xs px-2 py-2 text-on-surface focus:border-primary focus:outline-none"
+                >
+                  <option value="any">Any</option>
+                  <option value="yes">Has HOA</option>
+                  <option value="no">No HOA</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Max Days on Market */}
             <div>
               <label className="section-header text-xs text-on-surface-variant block mb-1">Max Days on Market</label>
               <select

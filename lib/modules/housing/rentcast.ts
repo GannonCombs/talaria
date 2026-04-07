@@ -76,8 +76,19 @@ export interface ListingFilters {
   minPrice?: number;
   maxPrice?: number;
   minBeds?: number;
+  minBaths?: number;
   minSqft?: number;
   maxDom?: number;
+  // Comma-separated list of property types when arriving via API; an
+  // array internally. Empty/undefined = no filter.
+  propertyTypes?: string[];
+  yearMin?: number;
+  yearMax?: number;
+  minLotSqft?: number;
+  maxHoa?: number;
+  hasHoa?: 'yes' | 'no' | 'any';
+  // When true, INNER JOIN housing_tracked so only bookmarked rows return.
+  bookmarksOnly?: boolean;
 }
 
 // Cache freshness thresholds (in hours)
@@ -102,8 +113,11 @@ export async function fetchMarketStats(zip: string): Promise<MarketStats | null>
 // SQLite cache. The MPP-spending refresh path is `refreshListingsFromMpp()`
 // below — it must be invoked explicitly (e.g. by a Refresh button), never
 // from a code path that runs on page load or browser reload.
+//
+// `zip` may be null when filtering by bookmarks (or other zip-agnostic
+// criteria). The cached SQL query handles both shapes.
 export async function fetchListings(
-  zip: string,
+  zip: string | null,
   filters?: ListingFilters
 ): Promise<Listing[]> {
   return getCachedListings(zip, filters);
@@ -256,37 +270,85 @@ function getCachedStats(zip: string): { stats: MarketStats; fetchedAt: string } 
   };
 }
 
-function getCachedListings(zip: string, filters?: ListingFilters): Listing[] {
+function getCachedListings(zip: string | null, filters?: ListingFilters): Listing[] {
   const db = getDb();
-  const conditions = ['zip = ?'];
-  const params: unknown[] = [zip];
+  // Always alias the listings table as `l` so the optional bookmarks JOIN
+  // can disambiguate. Conditions all reference `l.column`.
+  // zip is optional — when omitted, the query spans all zips (used by the
+  // bookmarks-only filter so a bookmark in any zip is reachable).
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (zip) {
+    conditions.push('l.zip = ?');
+    params.push(zip);
+  }
 
   if (filters?.minPrice) {
-    conditions.push('price >= ?');
+    conditions.push('l.price >= ?');
     params.push(filters.minPrice);
   }
   if (filters?.maxPrice) {
-    conditions.push('price <= ?');
+    conditions.push('l.price <= ?');
     params.push(filters.maxPrice);
   }
   if (filters?.minBeds) {
-    conditions.push('beds >= ?');
+    conditions.push('l.beds >= ?');
     params.push(filters.minBeds);
   }
+  if (filters?.minBaths) {
+    conditions.push('l.baths >= ?');
+    params.push(filters.minBaths);
+  }
   if (filters?.minSqft) {
-    conditions.push('sqft >= ?');
+    conditions.push('l.sqft >= ?');
     params.push(filters.minSqft);
   }
   if (filters?.maxDom) {
-    conditions.push('days_on_market <= ?');
+    conditions.push('l.days_on_market <= ?');
     params.push(filters.maxDom);
   }
+  if (filters?.yearMin) {
+    conditions.push('l.year_built >= ?');
+    params.push(filters.yearMin);
+  }
+  if (filters?.yearMax) {
+    conditions.push('l.year_built <= ?');
+    params.push(filters.yearMax);
+  }
+  if (filters?.minLotSqft) {
+    conditions.push('l.lot_sqft >= ?');
+    params.push(filters.minLotSqft);
+  }
+  if (filters?.maxHoa) {
+    conditions.push('l.hoa_monthly <= ?');
+    params.push(filters.maxHoa);
+  }
+  if (filters?.hasHoa === 'yes') {
+    conditions.push('l.hoa_monthly > 0');
+  } else if (filters?.hasHoa === 'no') {
+    conditions.push('(l.hoa_monthly = 0 OR l.hoa_monthly IS NULL)');
+  }
+  if (filters?.propertyTypes && filters.propertyTypes.length > 0) {
+    // propertyType lives in the metadata JSON column. Use json_extract.
+    const placeholders = filters.propertyTypes.map(() => '?').join(',');
+    conditions.push(`json_extract(l.metadata, '$.propertyType') IN (${placeholders})`);
+    params.push(...filters.propertyTypes);
+  }
+
+  // Bookmarks filter: INNER JOIN housing_tracked so non-bookmarked rows
+  // are excluded entirely.
+  const join = filters?.bookmarksOnly
+    ? 'INNER JOIN housing_tracked t ON t.listing_id = l.id'
+    : '';
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const rows = db
     .prepare(
-      `SELECT * FROM housing_listings
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY deal_score DESC NULLS LAST, price ASC`
+      `SELECT l.* FROM housing_listings l
+       ${join}
+       ${where}
+       ORDER BY l.deal_score DESC NULLS LAST, l.price ASC`
     )
     .all(...params) as Record<string, unknown>[];
 
