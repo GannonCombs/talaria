@@ -1,29 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
-import { getDb } from './db';
-
-const KEYS_DIR = path.join(process.cwd(), 'keys');
-const PK_FILE = path.join(KEYS_DIR, 'wallet.key');
-
-function ensureKeysDir() {
-  if (!fs.existsSync(KEYS_DIR)) {
-    fs.mkdirSync(KEYS_DIR, { mode: 0o700 });
-  }
-}
-
-function savePrivateKey(privateKey: string) {
-  ensureKeysDir();
-  fs.writeFileSync(PK_FILE, privateKey, { mode: 0o600 });
-}
-
-function loadPrivateKey(): string | null {
-  try {
-    return fs.readFileSync(PK_FILE, 'utf8').trim();
-  } catch {
-    return null;
-  }
-}
+import os from 'os';
 
 export interface ChainBalance {
   chain: string;
@@ -49,112 +26,54 @@ export interface WalletInfo {
   linkedAccounts: LinkedAccount[];
 }
 
-interface CreateWalletResult {
-  evmAddress: string;
-  solanaAddress: string;
+// ── AgentCash wallet ──
+
+const AGENTCASH_WALLET_PATH = path.join(os.homedir(), '.agentcash', 'wallet.json');
+
+interface AgentCashWallet {
+  privateKey: string;
+  address: string;
+  createdAt: string;
 }
 
-// Derive a Solana Ed25519 keypair deterministically from the EVM private key.
-// Uses HKDF to derive 32 bytes of Ed25519 seed from the secp256k1 key.
-function deriveSolanaKeypair(evmPrivateKey: string) {
-  const ikm = Buffer.from(evmPrivateKey.replace('0x', ''), 'hex');
-  const salt = Buffer.from('talaria-solana-derivation', 'utf8');
-  const info = Buffer.from('ed25519-seed', 'utf8');
-  const prk = crypto.createHmac('sha256', salt).update(ikm).digest();
-  const seed = crypto.createHmac('sha256', prk).update(Buffer.concat([info, Buffer.from([1])])).digest().subarray(0, 32);
-  return seed;
+function loadAgentCashWallet(): AgentCashWallet | null {
+  try {
+    const raw = fs.readFileSync(AGENTCASH_WALLET_PATH, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
-
-export async function createWallet(): Promise<CreateWalletResult> {
-  const { ethers } = await import('ethers');
-  const { Keypair } = await import('@solana/web3.js');
-
-  // Generate one private key
-  const wallet = ethers.Wallet.createRandom();
-  const privateKey = wallet.privateKey;
-  const evmAddress = wallet.address;
-
-  // Derive Solana keypair from the same key
-  const solanaSeed = deriveSolanaKeypair(privateKey);
-  const solanaKeypair = Keypair.fromSeed(solanaSeed);
-  const solanaAddress = solanaKeypair.publicKey.toBase58();
-
-  // Store one key
-  savePrivateKey(privateKey);
-
-  // Store addresses in DB
-  const db = getDb();
-  const upsert = db.prepare(
-    `INSERT INTO user_preferences (key, value, updated_at)
-     VALUES (?, ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  );
-
-  upsert.run('wallet.evm_address', evmAddress);
-  upsert.run('wallet.solana_address', solanaAddress);
-
-  return { evmAddress, solanaAddress };
-}
-
-// ── Wallet state ──
 
 export function walletExists(): boolean {
-  return loadPrivateKey() !== null;
+  return loadAgentCashWallet() !== null;
 }
 
-// Recover addresses from the stored private key if DB was reset
-async function recoverAddresses(): Promise<void> {
-  const raw = loadPrivateKey();
-  if (!raw) return;
-
-  const { ethers } = await import('ethers');
-  const { Keypair } = await import('@solana/web3.js');
-
-  // Handle old JSON format or raw hex
-  let evmKey: string;
+// Get the AgentCash Solana address (cached in DB after first fetch)
+function getAgentCashSolanaAddress(): string {
   try {
-    const parsed = JSON.parse(raw);
-    evmKey = parsed.evm;
+    const { getDb } = require('./db');
+    const db = getDb();
+    const row = db
+      .prepare("SELECT value FROM user_preferences WHERE key = 'wallet.agentcash_solana'")
+      .get() as { value: string } | undefined;
+    if (row?.value) return row.value;
+
+    // Fetch from agentcash CLI and cache
+    const { execSync } = require('child_process');
+    const output = execSync('npx agentcash@latest accounts --format json', { timeout: 15000, stdio: 'pipe' }).toString();
+    const data = JSON.parse(output);
+    const solAccount = data.data?.accounts?.find((a: { network: string }) => a.network === 'solana');
+    if (solAccount?.address) {
+      db.prepare(
+        `INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES (?, ?, datetime('now'))`
+      ).run('wallet.agentcash_solana', solAccount.address);
+      return solAccount.address;
+    }
+    return '';
   } catch {
-    evmKey = raw;
+    return '';
   }
-
-  const wallet = new ethers.Wallet(evmKey);
-  const solanaSeed = deriveSolanaKeypair(evmKey);
-  const solanaKeypair = Keypair.fromSeed(solanaSeed);
-
-  const db = getDb();
-  const upsert = db.prepare(
-    `INSERT INTO user_preferences (key, value, updated_at)
-     VALUES (?, ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  );
-
-  upsert.run('wallet.evm_address', wallet.address);
-  upsert.run('wallet.solana_address', solanaKeypair.publicKey.toBase58());
-
-  // If old JSON format, convert to just the raw key
-  try {
-    JSON.parse(raw);
-    savePrivateKey(evmKey);
-  } catch {
-    // Already raw format
-  }
-}
-
-function getStoredAddresses(): { evmAddress: string; solanaAddress: string } {
-  const db = getDb();
-  const evm = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'wallet.evm_address'")
-    .get() as { value: string } | undefined;
-  const sol = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'wallet.solana_address'")
-    .get() as { value: string } | undefined;
-
-  return {
-    evmAddress: evm?.value ?? '',
-    solanaAddress: sol?.value ?? '',
-  };
 }
 
 function truncateAddress(addr: string): string {
@@ -163,15 +82,9 @@ function truncateAddress(addr: string): string {
 }
 
 export async function getWalletBalance(): Promise<WalletInfo> {
-  // If key file exists but addresses aren't in DB, re-derive them
-  if (walletExists()) {
-    const { evmAddress, solanaAddress } = getStoredAddresses();
-    if (!evmAddress || !solanaAddress) {
-      await recoverAddresses();
-    }
-  }
+  const acWallet = loadAgentCashWallet();
 
-  if (!walletExists()) {
+  if (!acWallet) {
     return {
       exists: false,
       evmAddress: '',
@@ -185,33 +98,23 @@ export async function getWalletBalance(): Promise<WalletInfo> {
     };
   }
 
-  const { evmAddress, solanaAddress } = getStoredAddresses();
+  const evmAddress = acWallet.address;
+  const solanaAddress = getAgentCashSolanaAddress();
 
-  // Query real on-chain balances
-  const evmBalances: ChainBalance[] = [];
-  const solanaBalances: ChainBalance[] = [];
+  // Query all balances in parallel
+  const [tempoUsdc, baseUsdc, solBalance] = await Promise.all([
+    queryErc20Balance('https://rpc.tempo.xyz', '0x20C000000000000000000000b9537d11c60E8b50', evmAddress, 6),
+    queryErc20Balance('https://mainnet.base.org', '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', evmAddress, 6),
+    solanaAddress ? querySolBalance(solanaAddress) : Promise.resolve(0),
+  ]);
 
-  // Tempo USDC.e balance
-  const tempoUsdc = await queryErc20Balance(
-    'https://rpc.tempo.xyz',
-    '0x20C000000000000000000000b9537d11c60E8b50',
-    evmAddress,
-    6
-  );
-  evmBalances.push({ chain: 'tempo', symbol: 'USDC', balance: tempoUsdc, usdValue: tempoUsdc });
-
-  // Base USDC balance
-  const baseUsdc = await queryErc20Balance(
-    'https://mainnet.base.org',
-    '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    evmAddress,
-    6
-  );
-  evmBalances.push({ chain: 'base', symbol: 'USDC', balance: baseUsdc, usdValue: baseUsdc });
-
-  // Solana SOL balance (via public RPC)
-  const solBalance = await querySolBalance(solanaAddress);
-  solanaBalances.push({ chain: 'solana', symbol: 'SOL', balance: solBalance, usdValue: 0 });
+  const evmBalances: ChainBalance[] = [
+    { chain: 'tempo', symbol: 'USDC', balance: tempoUsdc, usdValue: tempoUsdc },
+    { chain: 'base', symbol: 'USDC', balance: baseUsdc, usdValue: baseUsdc },
+  ];
+  const solanaBalances: ChainBalance[] = [
+    { chain: 'solana', symbol: 'SOL', balance: solBalance, usdValue: 0 },
+  ];
 
   const totalUsd = evmBalances.reduce((s, b) => s + b.usdValue, 0);
 
@@ -219,13 +122,27 @@ export async function getWalletBalance(): Promise<WalletInfo> {
     exists: true,
     evmAddress: truncateAddress(evmAddress),
     evmAddressFull: evmAddress,
-    solanaAddress: truncateAddress(solanaAddress),
+    solanaAddress: solanaAddress ? truncateAddress(solanaAddress) : '',
     solanaAddressFull: solanaAddress,
     totalUsd,
     evmBalances,
     solanaBalances,
     linkedAccounts: [],
   };
+}
+
+// ── Wallet creation (via AgentCash) ──
+
+export async function createWallet(): Promise<{ evmAddress: string; solanaAddress: string }> {
+  // If AgentCash wallet already exists, just return its info
+  const existing = loadAgentCashWallet();
+  if (existing) {
+    const solAddr = getAgentCashSolanaAddress();
+    return { evmAddress: existing.address, solanaAddress: solAddr };
+  }
+
+  // Otherwise, tell the user to run AgentCash onboarding
+  throw new Error('Run "npx agentcash onboard" in your terminal to create a wallet');
 }
 
 // ── On-chain balance queries ──
@@ -249,7 +166,7 @@ async function queryErc20Balance(
         params: [{ to: tokenContract, data }, 'latest'],
         id: 1,
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(5000),
     });
 
     const json = await res.json();
@@ -275,7 +192,7 @@ async function querySolBalance(address: string): Promise<number> {
         params: [address],
         id: 1,
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(5000),
     });
 
     const json = await res.json();
