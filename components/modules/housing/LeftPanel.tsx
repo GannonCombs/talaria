@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2 } from 'lucide-react';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
 
@@ -88,8 +88,32 @@ export default function LeftPanel({
   const [section, setSection] = useState<SectionView>('menu');
   const [moreOptions, setMoreOptions] = useState(false);
 
-  function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
-    onFiltersChange({ ...filters, [key]: value });
+  // Draft filters: inputs feed this local state on every keystroke. The
+  // parent's `filters` only updates (and the listings re-fetch) when the
+  // user clicks the Go button. This is the same pattern as the isochrone
+  // submit flow — keeps editing 250000 → 200000 from briefly committing
+  // a "max $20,000" filter mid-keystroke.
+  const [draftFilters, setDraftFilters] = useState<Filters>(filters);
+
+  // Keep draft synced with parent on external changes (e.g. preference
+  // load on mount, future Reset button) without clobbering local edits.
+  useEffect(() => {
+    setDraftFilters(filters);
+  }, [filters]);
+
+  const filtersDirty =
+    draftFilters.priceMin !== filters.priceMin ||
+    draftFilters.priceMax !== filters.priceMax ||
+    draftFilters.minBeds !== filters.minBeds ||
+    draftFilters.minSqft !== filters.minSqft ||
+    draftFilters.maxDom !== filters.maxDom;
+
+  function updateDraft<K extends keyof Filters>(key: K, value: Filters[K]) {
+    setDraftFilters({ ...draftFilters, [key]: value });
+  }
+
+  function commitFilters() {
+    onFiltersChange(draftFilters);
   }
 
   function updateWeight(key: keyof ScoringWeights, value: number) {
@@ -308,16 +332,18 @@ export default function LeftPanel({
             <input
               type="number"
               placeholder="Min"
-              value={filters.priceMin || ''}
-              onChange={(e) => updateFilter('priceMin', Number(e.target.value))}
+              value={draftFilters.priceMin || ''}
+              onChange={(e) => updateDraft('priceMin', Number(e.target.value))}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
               className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
             />
             <span className="text-on-surface-variant text-sm">–</span>
             <input
               type="number"
               placeholder="Max"
-              value={filters.priceMax || ''}
-              onChange={(e) => updateFilter('priceMax', Number(e.target.value))}
+              value={draftFilters.priceMax || ''}
+              onChange={(e) => updateDraft('priceMax', Number(e.target.value))}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
               className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
             />
           </div>
@@ -328,8 +354,8 @@ export default function LeftPanel({
           <div>
             <label className="section-header text-xs text-on-surface-variant block mb-1">Beds</label>
             <select
-              value={filters.minBeds}
-              onChange={(e) => updateFilter('minBeds', Number(e.target.value))}
+              value={draftFilters.minBeds}
+              onChange={(e) => updateDraft('minBeds', Number(e.target.value))}
               className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none"
             >
               <option value={0}>Any</option>
@@ -343,8 +369,9 @@ export default function LeftPanel({
             <input
               type="number"
               placeholder="Any"
-              value={filters.minSqft || ''}
-              onChange={(e) => updateFilter('minSqft', Number(e.target.value))}
+              value={draftFilters.minSqft || ''}
+              onChange={(e) => updateDraft('minSqft', Number(e.target.value))}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitFilters(); }}
               className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface font-mono focus:border-primary focus:outline-none placeholder:text-on-surface-variant"
             />
           </div>
@@ -362,8 +389,8 @@ export default function LeftPanel({
             <div>
               <label className="section-header text-xs text-on-surface-variant block mb-1">Max Days on Market</label>
               <select
-                value={filters.maxDom}
-                onChange={(e) => updateFilter('maxDom', Number(e.target.value))}
+                value={draftFilters.maxDom}
+                onChange={(e) => updateDraft('maxDom', Number(e.target.value))}
                 className="w-full bg-surface-container-lowest border border-outline text-sm px-3 py-2 text-on-surface focus:border-primary focus:outline-none"
               >
                 <option value={0}>Any</option>
@@ -375,6 +402,16 @@ export default function LeftPanel({
             </div>
           </div>
         )}
+
+        {/* Apply (Go) button — commits draft to parent. Disabled when no
+            pending edits, so it visually reflects whether there's work to do. */}
+        <button
+          onClick={commitFilters}
+          disabled={!filtersDirty}
+          className="w-full h-9 text-xs font-bold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-on-primary disabled:border-outline disabled:text-on-surface-variant disabled:hover:bg-transparent disabled:hover:text-on-surface-variant disabled:cursor-not-allowed"
+        >
+          {filtersDirty ? 'Apply Filters' : 'Filters Applied'}
+        </button>
       </div>
 
       {/* Divider */}

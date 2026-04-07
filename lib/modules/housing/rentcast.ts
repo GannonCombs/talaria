@@ -1,4 +1,45 @@
 import { getDb } from '@/lib/db';
+import { logMppTransaction } from '@/lib/mpp';
+import { spawnSync } from 'child_process';
+import path from 'path';
+
+// Path to the installed agentcash CLI bin. Computed from process.cwd() at
+// runtime — Turbopack rewrites `require.resolve` for externals into a fake
+// `[externals]` placeholder string, so we deliberately avoid it.
+const agentcashCli = path.join(
+  process.cwd(),
+  'node_modules',
+  'agentcash',
+  'dist',
+  'esm',
+  'index.js'
+);
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function callRentcast(endpoint: string, body: Record<string, unknown>): any {
+  const result = spawnSync(
+    process.execPath,
+    [
+      agentcashCli,
+      'fetch',
+      `https://rentcast.mpp.paywithlocus.com${endpoint}`,
+      '-m', 'POST',
+      '-b', JSON.stringify(body),
+      '--format', 'json',
+    ],
+    { timeout: 120000, shell: false, encoding: 'utf8' }
+  );
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`agentcash exited ${result.status}: ${result.stderr || result.stdout}`);
+  }
+  const parsed = JSON.parse(result.stdout);
+  if (parsed.success === false) {
+    throw new Error(`agentcash error: ${JSON.stringify(parsed.error)}`);
+  }
+  return parsed.data?.data ?? parsed.data ?? parsed;
+}
 
 export interface MarketStats {
   zip: string;
@@ -41,7 +82,6 @@ export interface ListingFilters {
 
 // Cache freshness thresholds (in hours)
 const STATS_STALE_HOURS = 7 * 24; // 7 days
-const LISTINGS_STALE_HOURS = 24;   // 1 day
 
 export async function fetchMarketStats(zip: string): Promise<MarketStats | null> {
   const cached = getCachedStats(zip);
@@ -58,16 +98,122 @@ export async function fetchMarketStats(zip: string): Promise<MarketStats | null>
   return cached?.stats ?? null;
 }
 
+// READ-ONLY. Never makes a paid call. Always returns whatever is in the
+// SQLite cache. The MPP-spending refresh path is `refreshListingsFromMpp()`
+// below — it must be invoked explicitly (e.g. by a Refresh button), never
+// from a code path that runs on page load or browser reload.
 export async function fetchListings(
   zip: string,
   filters?: ListingFilters
 ): Promise<Listing[]> {
-  // TODO: When Tempo wallet is live, check staleness and make MPP call to RentCast:
-  // const response = await tempoFetch(`https://rentcast.mpp.tempo.xyz/v1/listings?zip=${zip}`);
-  // logMppTransaction({ service: 'RentCast', module: 'housing', endpoint: '/v1/listings', costUsd: 0.05 });
-
-  // For now, return from DB (seeded by seed.ts)
   return getCachedListings(zip, filters);
+}
+
+// EXPLICITLY-INVOKED ONLY. Costs $0.033 per call to RentCast via MPP.
+// Do not wire this into any auto-firing path (useEffect, page load,
+// GET endpoint that the UI calls on render). Refresh buttons, manual
+// API calls only.
+export async function refreshListingsFromMpp(zip: string): Promise<{
+  fetched: number;
+  cost: number;
+}> {
+  const data = callRentcast('/rentcast/sale-listings', {
+    zipCode: zip,
+    status: 'Active',
+    limit: 500,
+  });
+  const records: RentcastListing[] = Array.isArray(data) ? data : [];
+
+  const db = getDb();
+  const upsert = db.prepare(
+    `INSERT INTO housing_listings
+       (address, zip, price, beds, baths, sqft, lot_sqft, year_built,
+        hoa_monthly, listing_url, days_on_market, status, latitude,
+        longitude, last_seen, metadata)
+     VALUES
+       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+     ON CONFLICT(address, zip) DO UPDATE SET
+       price = excluded.price,
+       beds = excluded.beds,
+       baths = excluded.baths,
+       sqft = excluded.sqft,
+       lot_sqft = excluded.lot_sqft,
+       year_built = excluded.year_built,
+       hoa_monthly = excluded.hoa_monthly,
+       listing_url = excluded.listing_url,
+       days_on_market = excluded.days_on_market,
+       status = excluded.status,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       last_seen = datetime('now'),
+       metadata = excluded.metadata`
+  );
+
+  const insertMany = db.transaction((rows: RentcastListing[]) => {
+    for (const r of rows) {
+      if (!r.formattedAddress || r.price == null) continue;
+      upsert.run(
+        r.formattedAddress,
+        r.zipCode ?? zip,
+        r.price,
+        r.bedrooms ?? null,
+        r.bathrooms ?? null,
+        r.squareFootage ?? null,
+        r.lotSize ?? null,
+        r.yearBuilt ?? null,
+        r.hoa?.fee ?? 0,
+        null,
+        r.daysOnMarket ?? null,
+        r.status ?? 'Active',
+        r.latitude ?? null,
+        r.longitude ?? null,
+        JSON.stringify({
+          rentcastId: r.id,
+          propertyType: r.propertyType,
+          mlsName: r.mlsName,
+          mlsNumber: r.mlsNumber,
+          listedDate: r.listedDate,
+          listingAgent: r.listingAgent?.name,
+          listingOffice: r.listingOffice?.name,
+        })
+      );
+    }
+  });
+  insertMany(records);
+
+  logMppTransaction({
+    service: 'RentCast',
+    module: 'housing',
+    endpoint: '/rentcast/sale-listings',
+    rail: 'tempo',
+    costUsd: 0.033,
+    metadata: { via: 'usdc', zipCode: zip, count: records.length },
+  });
+
+  return { fetched: records.length, cost: 0.033 };
+}
+
+interface RentcastListing {
+  id?: string;
+  formattedAddress?: string;
+  zipCode?: string;
+  price?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  squareFootage?: number;
+  lotSize?: number;
+  yearBuilt?: number;
+  hoa?: { fee?: number };
+  daysOnMarket?: number;
+  status?: string;
+  latitude?: number;
+  longitude?: number;
+  propertyType?: string;
+  mlsName?: string;
+  mlsNumber?: string;
+  listedDate?: string;
+  listingAgent?: { name?: string };
+  listingOffice?: { name?: string };
 }
 
 export async function fetchPropertyDetails(

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { CreditCard, Zap, ChevronLeft, ChevronRight, Download, Search } from 'lucide-react';
+import { formatTxnTimestamp } from '@/lib/time';
 
 interface Transaction {
   id: number;
@@ -124,7 +125,7 @@ export default function FullTransactionTable({
                   className="hover:bg-surface-container-highest"
                 >
                   <td className="px-4 py-3 font-mono text-xs text-on-surface-variant">
-                    {tx.timestamp}
+                    {formatTxnTimestamp(tx.timestamp)}
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-on-surface">
                     {tx.service}

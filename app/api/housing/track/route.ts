@@ -23,9 +23,15 @@ export async function DELETE(request: NextRequest) {
 
 export async function GET() {
   const db = getDb();
+  // `l.*` would set `id` from the listings table, shadowing the tracked
+  // FK. Select listing_id explicitly so the frontend can match by it.
   const tracked = db
     .prepare(
-      `SELECT l.*, t.tracked_at, t.notes as track_notes
+      `SELECT t.listing_id, t.tracked_at, t.notes as track_notes,
+              l.id, l.address, l.zip, l.price, l.beds, l.baths, l.sqft,
+              l.lot_sqft, l.year_built, l.hoa_monthly, l.tax_annual,
+              l.listing_url, l.days_on_market, l.status, l.latitude,
+              l.longitude, l.deal_score, l.monthly_cost
        FROM housing_tracked t
        JOIN housing_listings l ON l.id = t.listing_id
        ORDER BY t.tracked_at DESC`

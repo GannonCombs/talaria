@@ -63,15 +63,22 @@ interface HousingMapProps {
   onListingClick?: (id: number) => void;
 }
 
-function getPinColor(dealScore: number | null): string {
-  if (dealScore === null) return '#8b949e';
-  if (dealScore >= 85) return '#fbab29';
-  return '#46f1c5';
+// Pin color. Two options kept around so we can toggle without re-picking:
+//   PIN_COLOR_TEAL — Talaria primary. Clashes with the mint isochrone color
+//                    but is unmistakably "the brand" and pops on dark map.
+//   PIN_COLOR_SKY  — sky-400. Cooler, more distinct from isochrones, but
+//                    shades closer to the (future) flood-zone overlay blue.
+const PIN_COLOR_TEAL = '#46f1c5';
+const PIN_COLOR_SKY = '#38bdf8';
+const PIN_COLOR = PIN_COLOR_TEAL;
+
+function getPinColor(_dealScore: number | null): string {
+  return PIN_COLOR;
 }
 
 function getPinRadius(dealScore: number | null): number {
-  if (dealScore === null) return 5;
-  return 4 + (dealScore / 100) * 4;
+  if (dealScore === null) return 6;
+  return 5 + (dealScore / 100) * 4;
 }
 
 // Map controls
@@ -291,10 +298,10 @@ export default function HousingMap({
             center={[listing.latitude, listing.longitude]}
             radius={getPinRadius(listing.dealScore)}
             pathOptions={{
-              color: getPinColor(listing.dealScore),
+              color: '#0d1117',
               fillColor: getPinColor(listing.dealScore),
-              fillOpacity: 0.8,
-              weight: 1,
+              fillOpacity: 0.95,
+              weight: 1.5,
             }}
             eventHandlers={{
               click: () => onListingClick?.(listing.id),
@@ -316,7 +323,7 @@ export default function HousingMap({
                   </>
                 )}
                 <br />
-                {listing.beds}bd / {listing.baths}ba / {listing.sqft.toLocaleString()} sqft
+                {listing.beds ?? '?'}bd / {listing.baths ?? '?'}ba / {listing.sqft != null ? `${listing.sqft.toLocaleString()} sqft` : 'sqft unknown'}
               </div>
             </Tooltip>
           </CircleMarker>

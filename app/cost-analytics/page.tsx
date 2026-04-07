@@ -6,6 +6,7 @@ import SpendChart from '@/components/cost-analytics/SpendChart';
 import ServiceDonut from '@/components/cost-analytics/ServiceDonut';
 import InsightCards from '@/components/cost-analytics/InsightCards';
 import FullTransactionTable from '@/components/cost-analytics/FullTransactionTable';
+import { formatTxnTimestamp } from '@/lib/time';
 
 interface Stats {
   today: number;
@@ -44,7 +45,7 @@ function exportCsv(
   const rows = transactions
     .map(
       (t) =>
-        `"${t.timestamp}","${t.service}","${t.module}","${t.endpoint ?? ''}","${t.rail}",${t.cost_usd}`
+        `"${formatTxnTimestamp(t.timestamp)}","${t.service}","${t.module}","${t.endpoint ?? ''}","${t.rail}",${t.cost_usd}`
     )
     .join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });

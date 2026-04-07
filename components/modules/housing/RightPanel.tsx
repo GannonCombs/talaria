@@ -230,7 +230,7 @@ export default function RightPanel({
                       {listing.address}
                     </div>
                     <div className="text-xs text-on-surface-variant font-mono mt-0.5">
-                      {listing.beds}bd · {listing.baths}ba · {listing.sqft.toLocaleString()} sqft
+                      {listing.beds ?? '?'}bd · {listing.baths ?? '?'}ba · {listing.sqft != null ? `${listing.sqft.toLocaleString()} sqft` : 'sqft —'}
                     </div>
                   </div>
                   {listing.dealScore !== null && (

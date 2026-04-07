@@ -231,20 +231,36 @@ export default function HousingPage() {
     ? neighborhoods.find((n) => n.zip === selectedListing.zip) ?? null
     : null;
 
+  // Rudimentary "deal" ranking: lowest price-per-square-foot wins.
+  // 100% weighted on $/sqft because it's the only signal we have wired
+  // up right now (RentCast sale-listings provides price + sqft directly).
+  // Replace with the full neighborhood-weighted dealScore once that path
+  // is wired.
   const topListings = [...listings]
-    .filter((l) => l.dealScore !== null)
-    .sort((a, b) => (b.dealScore ?? 0) - (a.dealScore ?? 0))
+    .filter((l) => l.sqft != null && l.sqft > 0 && l.price > 0)
+    .sort((a, b) => a.price / a.sqft - b.price / b.sqft)
     .slice(0, 3);
 
   return (
     <div className="h-[calc(100vh-3.5rem-2rem)] flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center px-4 py-2 border-b border-outline shrink-0">
+      <div className="relative flex items-center px-4 py-2 border-b border-outline shrink-0">
         <div className="flex items-center gap-3">
           <BackButton />
           <h1 className="text-lg font-bold tracking-tight text-on-surface">
             Housing
           </h1>
+        </div>
+        {/* Listing count — absolute-positioned to mirror the floating
+            overlay controls box. Right edge at 336px (320px right panel +
+            16px controls margin) and width matches the box, with text-center
+            so the count visually centers within imaginary vertical lines
+            extended upward from the box walls. */}
+        <div
+          className="absolute font-mono text-xs text-on-surface-variant text-center"
+          style={{ right: '336px', width: '156px' }}
+        >
+          {listings.length.toLocaleString()} {listings.length === 1 ? 'listing' : 'listings'}
         </div>
       </div>
 

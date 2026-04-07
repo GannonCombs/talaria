@@ -1,4 +1,5 @@
 import { RailIcon, MethodIcon } from '@/components/shared/PaymentIcons';
+import { formatTxnTimestamp } from '@/lib/time';
 
 export interface Transaction {
   id: number;
@@ -98,7 +99,7 @@ export default function TransactionTable({
                   }`}
                 >
                   <td className="px-6 py-4 font-mono text-on-surface-variant">
-                    {tx.timestamp}
+                    {formatTxnTimestamp(tx.timestamp)}
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">

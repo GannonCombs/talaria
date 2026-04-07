@@ -46,13 +46,17 @@ export function logMppTransaction(params: {
   );
 }
 
+// Day-bucketing queries use SQLite's `'localtime'` modifier so "today" and
+// "this month" mean the user's local day/month, not UTC. The dev server
+// runs on the user's machine (Central), so localtime is Central. Stored
+// timestamps remain UTC; the conversion is purely for the comparison.
 export function getTodaySpend(): number {
   const db = getDb();
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) as total
        FROM mpp_transactions
-       WHERE date(timestamp) = date('now')`
+       WHERE date(timestamp, 'localtime') = date('now', 'localtime')`
     )
     .get() as { total: number };
   return row.total;
@@ -64,7 +68,7 @@ export function getMonthSpend(): number {
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) as total
        FROM mpp_transactions
-       WHERE strftime('%Y-%m', timestamp) = strftime('%Y-%m', 'now')`
+       WHERE strftime('%Y-%m', timestamp, 'localtime') = strftime('%Y-%m', 'now', 'localtime')`
     )
     .get() as { total: number };
   return row.total;
@@ -189,10 +193,10 @@ export function getDailySpend(days: number): DailySpend[] {
   const db = getDb();
   return db
     .prepare(
-      `SELECT date(timestamp) as date, SUM(cost_usd) as total, COUNT(*) as count
+      `SELECT date(timestamp, 'localtime') as date, SUM(cost_usd) as total, COUNT(*) as count
        FROM mpp_transactions
        WHERE timestamp >= datetime('now', ? || ' days')
-       GROUP BY date(timestamp)
+       GROUP BY date(timestamp, 'localtime')
        ORDER BY date ASC`
     )
     .all(`-${days}`) as DailySpend[];

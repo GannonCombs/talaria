@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   ExternalLink,
   Bookmark,
-  BookmarkCheck,
   Calendar,
   Ruler,
   DollarSign,
@@ -152,9 +151,9 @@ export default function ListingDrawer({
             {listing.zip} · Built {listing.yearBuilt}
           </div>
           <div className="flex gap-4 mt-2 text-sm text-on-surface-variant">
-            <span>{listing.beds} bd</span>
-            <span>{listing.baths} ba</span>
-            <span>{listing.sqft.toLocaleString()} sqft</span>
+            <span>{listing.beds ?? '?'} bd</span>
+            <span>{listing.baths ?? '?'} ba</span>
+            <span>{listing.sqft != null ? `${listing.sqft.toLocaleString()} sqft` : 'sqft —'}</span>
           </div>
         </div>
 
@@ -273,35 +272,34 @@ export default function ListingDrawer({
         )}
       </div>
 
-      {/* Action buttons */}
+      {/* Action buttons. Both share the same outlined-with-teal-hover
+          treatment used by the dashboard module cards. Track conveys state
+          via icon fill (empty bookmark → filled bookmark) instead of color
+          inversion, which kept the previous "white text on teal bg" being
+          unreadable on hover. */}
       <div className="shrink-0 p-4 border-t border-outline bg-surface-container-low flex gap-2">
         <a
-          href={`https://www.zillow.com/homes/${encodeURIComponent(listing.address + ' ' + listing.zip)}`}
+          // listing.address already includes the zip ("...Austin, TX 78745").
+          // Don't append it again — Zillow treats duplicate zips as junk.
+          href={`https://www.zillow.com/homes/${encodeURIComponent(listing.address)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-1 h-9 border border-outline text-on-surface-variant text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 hover:bg-surface-bright"
+          className="flex-1 h-9 border border-outline text-on-surface-variant text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 hover:shadow-[inset_0_0_0_2px_#46f1c5,0_0_12px_rgba(70,241,197,0.15)] hover:text-primary"
         >
           <ExternalLink size={12} />
           Zillow
         </a>
-        <a
-          href={`https://www.redfin.com/search#query=${encodeURIComponent(listing.address + ' ' + listing.zip)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-1 h-9 border border-outline text-on-surface-variant text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 hover:bg-surface-bright"
-        >
-          <ExternalLink size={12} />
-          Redfin
-        </a>
         <button
           onClick={toggleTrack}
-          className={`flex-1 h-9 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 ${
+          aria-pressed={tracked}
+          aria-label={tracked ? 'Untrack this listing' : 'Track this listing'}
+          className={`flex-1 h-9 border text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1 hover:shadow-[inset_0_0_0_2px_#46f1c5,0_0_12px_rgba(70,241,197,0.15)] hover:text-primary ${
             tracked
-              ? 'bg-primary text-on-primary'
-              : 'border border-primary text-primary hover:bg-primary hover:text-on-primary'
+              ? 'border-primary text-primary'
+              : 'border-outline text-on-surface-variant'
           }`}
         >
-          {tracked ? <BookmarkCheck size={12} /> : <Bookmark size={12} />}
+          <Bookmark size={12} fill={tracked ? 'currentColor' : 'none'} />
           {tracked ? 'Tracked' : 'Track'}
         </button>
       </div>
