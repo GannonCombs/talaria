@@ -33,7 +33,7 @@ const HARNESS_TIMEOUT_MS = 60_000;
 
 export interface ServiceConfig {
   id: string;
-  proxyClass: 'locus' | 'tempo' | 'direct' | 'x402-base';
+  proxyClass: 'locus' | 'tempo' | 'direct' | 'x402-base' | 'self';
   url: string;
   method: 'GET' | 'POST';
   body?: Record<string, unknown>;

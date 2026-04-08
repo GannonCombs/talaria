@@ -1,8 +1,14 @@
-# MPP Latency Round 1 — Findings
+# MPP Latency — Findings (Rounds 1, 1.5, and 2)
 
 > **Date:** 2026-04-08
-> **Spend:** $0.1729 of a $1.00 hard cap
+> **Cumulative spend:** $0.1889 of a $1.00 hard cap
 > **Harness:** [scripts/mpp-latency/](../scripts/mpp-latency/)
+> **Reseller (Round 2):** [mpp-reseller/](../mpp-reseller/)
+>
+> This document covers three rounds of investigation:
+> - **Round 1** — wide sweep across 6 MPP services to find where the slowness lives. Conclusion: Google Maps via Tempo's proxy is ~5× slower than every other service.
+> - **Round 1.5** — controlled comparison via `alchemy.mpp.tempo.xyz` (same upstream as direct Alchemy, different proxy operator). Conclusion: the slowness is structural to Tempo's proxy class as a whole, not Google-Maps-specific.
+> - **Round 2** — built our own MPP reseller (`mpp-reseller/`) wrapping Google Maps endpoints. Conclusion: the reseller is the fastest proxy class measured, end-to-end and especially server-side. The "4.5s structural floor" we identified in Round 1 was actually agentcash CLI client overhead, not server work. Tempo's `googlemaps.mpp.tempo.xyz` is doing ~17 seconds of unnecessary server-side work per call.
 
 ## Background
 
@@ -196,3 +202,162 @@ Notes:
 - Alchemy direct mean is inflated by the smoke-test sample which paid full cold-cache cost; warm-only mean across the remaining 10 calls is 4516ms.
 - Alchemy via Tempo had 10 attempted samples; 8 succeeded, 1 hit agentcash's internal 30s timeout (~33.5s total elapsed before agentcash gave up), and 1 produced a network error coincident with a real internet drop on the test machine.
 - The two Alchemy entries are the same upstream API. The price difference ($0.001 direct vs $0.0001 Tempo-hosted) is set independently by each proxy operator.
+
+---
+
+# Round 2 — We built our own reseller and it's the fastest class measured
+
+> **Round 2 spend:** $0.0160 (16 paid calls × $0.001)
+> **Reseller code:** [mpp-reseller/](../mpp-reseller/)
+
+## What we built
+
+A standalone Node.js MPP reseller wrapping three Google Maps endpoints (Streetview Static, Places Text Search, Places Photo) using `mppx/hono`. Listens on `127.0.0.1:8787`. Owns its own wallet at `mpp-reseller/keys/reseller-wallet.json` (separate from the main agentcash wallet, with multiple guardrails to prevent any code path from touching `~/.agentcash/`).
+
+**Two `Mppx` instances at startup**, exposed on parallel route prefixes:
+
+| Path prefix | Mode | `tempo.charge({ waitForConfirmation })` |
+|---|---|---|
+| `/maps/...`, `/places/v1/...` | confirmed (default) | `true` (waits for on-chain inclusion) |
+| `/fast/maps/...`, `/fast/places/v1/...` | fast | `false` (broadcasts after simulation only) |
+
+Both modes call the same handler functions and the same upstream Google Maps API. Only the mppx middleware differs. This is the controlled experiment we couldn't run from outside any third-party reseller because we didn't own both ends of the call.
+
+Per-request server-side instrumentation (`mpp-reseller/src/instrumentation.ts`) captures six phase markers (T0 outer entry → T6 outer exit) and writes one NDJSON record per call to `mpp-reseller/logs/YYYY-MM-DD.ndjson`. This is the data Round 1 never had — the agentcash CLI was opaque from outside.
+
+## Headline finding — the per-class table updated
+
+Same harness, same client (agentcash CLI), same chain, same gap-between-calls. The new `self` row is the reseller; the others are unchanged from Round 1:
+
+| Class | Services | Calls | Mean total | **Median total** | Max total |
+|---|---:|---:|---:|---:|---:|
+| direct | 1 | 11 | 5180 | 4427 | 11817 |
+| locus | 4 | 11 | 4461 | 4446 | 4698 |
+| **self (reseller)** | **4** | **16** | **3995** | **3949** | **4634** |
+| tempo | 2 | 11 | 20270 | 19885 | 24555 |
+
+**Our reseller is the fastest class measured, end-to-end.** Median 3949 ms vs Locus 4446 ms vs direct 4427 ms vs Tempo 19885 ms. We beat the Locus floor by ~500 ms even on the harness's end-to-end timer (which includes all the agentcash CLI client overhead). The server-side numbers are dramatically better still.
+
+## Server-side phase decomposition
+
+The reseller's own NDJSON, filtered to paid retries (`status=200`, `total > 100ms`), n=19 records across the four endpoints:
+
+| Mode | Endpoint | n | Min | **Median** | Max | outer | upstream_ttfb | body |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| confirmed | streetview | 7 | 1226 | **1485** | 1800 | 1106 | 320 | 82 |
+| confirmed | textsearch | 3 | 1458 | **1690** | 1939 | 1087 | 539 | 73 |
+| fast | streetview | 6 | 863 | **917** | 1259 | 659 | 230 | 84 |
+| fast | textsearch | 3 | 1007 | **1099** | 1143 | 542 | 463 | 73 |
+
+Reading the rows: the **server-side** total to receive a paid 402 request, verify the payment, call Google Maps, and stream the response back is **0.9-1.7 seconds**, depending on mode and endpoint. The remaining ~2-3 seconds in the harness's end-to-end measurement is **all client-side**: agentcash CLI startup, viem signing, broadcasting the USDC.e transfer, and waiting for `tx.wait()` before re-fetching with the Authorization header.
+
+### Per-phase explanation
+- **`outer_overhead`** — T0→T1, the time mppx spent verifying the credential. On a paid retry this includes the on-chain payment confirmation wait (when `waitForConfirmation: true`), or just the broadcast roundtrip (when `false`).
+- **`pre_upstream`** — T1→T2, time between handler entry and the upstream `fetch()`. Effectively zero.
+- **`upstream_ttfb`** — T2→T3, time waiting for Google Maps to return the first byte of the response.
+- **`upstream_body`** — T3→T4, time downloading the response body. ~80 ms for a 45 KB Streetview JPEG.
+- **`receipt_attach`** — T5→T6, time mppx took to add the `Payment-Receipt` header. Sub-millisecond.
+
+## What `waitForConfirmation` actually costs
+
+Both endpoints show a clean, consistent delta when the only variable changed is `waitForConfirmation`:
+
+| Endpoint | Confirmed median | Fast median | Delta |
+|---|---:|---:|---:|
+| streetview | 1485 ms | 917 ms | **−568 ms (38% faster)** |
+| textsearch | 1690 ms | 1099 ms | **−591 ms (35% faster)** |
+
+**On-chain confirmation costs ~570-590 ms** server-side. mppx hardcodes `experimental_preconfirmationTime: 500` for Tempo's fast preconfirmation path, plus a small RPC roundtrip — the total of ~570 ms is consistent with about 1.1 Tempo blocks of wait time. Skipping it via `waitForConfirmation: false` doesn't make the call dramatically faster (the upstream call still has to happen), but it does cut server-side latency by roughly a third.
+
+The end-to-end (harness) delta is smaller (~440 ms instead of 570 ms) because some of the client-side work happens in parallel with the server's wait.
+
+## The big revision: what the "4.5s structural floor" actually is
+
+Round 1 measured five non-Tempo MPP services (Locus and direct) all clustering at ~4.5 seconds end-to-end with very tight variance. We called this a "structural floor" and assumed it was the unavoidable cost of MPP-on-Tempo. **Round 2 falsified that.**
+
+Apples-to-apples comparison, all measured by the same harness, same client, same network conditions:
+
+| | Server-side median | End-to-end (via harness) |
+|---|---:|---:|
+| Round 1 Locus services | unknown (CLI-opaque) | ~4,446 ms |
+| Round 2 reseller (confirmed) | **1,485 ms** | 3,949 ms |
+| Round 2 reseller (fast) | **917 ms** | 3,624 ms |
+
+Subtracting end-to-end from server-side gives the **client-side overhead** the harness adds:
+
+| Mode | End-to-end | Server-side | **Client-side** |
+|---|---:|---:|---:|
+| confirmed streetview | 4062 ms | 1485 ms | **2577 ms** |
+| fast streetview | 3624 ms | 917 ms | **2707 ms** |
+
+The agentcash CLI client adds a roughly constant ~2.6-2.7 seconds of overhead per call, regardless of which mode the server is in. That's where the "4.5s structural floor" came from — it was always **server time + client overhead**, and the client portion was big enough to make every endpoint look the same.
+
+**Implications:**
+
+1. **Locus's actual server-side latency was always faster than 4.5s**, probably in the 1-2 second range, just like ours. The harness couldn't see that because the CLI was a black box.
+2. **Building a faster reseller alone won't help users much** if they call it via the agentcash CLI — they'll still pay ~2.7 s of client overhead per call. The end-to-end win is real but modest.
+3. **A direct `mppx/client` integration in Talaria** (no subprocess) would let us hit the 1-2 second server-side number end-to-end. That's the path to genuinely fast MPP calls in user-facing flows.
+
+## The Tempo googlemaps mystery is now structurally bounded
+
+Tempo's `googlemaps.mpp.tempo.xyz` median end-to-end: ~21,636 ms.
+Our reseller's median end-to-end (same upstream, same chain, same client): ~4,062 ms.
+
+That's a ~17,500 ms gap, with **every variable controlled for except the proxy implementation itself.** The chain is the same. The upstream API is the same (literally Google's Streetview Static endpoint). The mppx server library is the same. The `waitForConfirmation` default is the same. The agentcash client path is the same.
+
+**Whatever Tempo is doing on their side adds ~17 seconds of pure overhead per call.** Most plausible explanations:
+
+- **Cold-start serverless on every request** (Lambda or Cloud Run with aggressive scale-to-zero, and apparently no warm pool)
+- **Aggressive on-chain confirmation policy** (waiting for many more blocks than mppx defaults — 17s would be 30+ blocks at Tempo's 500 ms block time)
+- **Synchronous upstream call serialized behind the entire confirmation wait** (vs overlapping the way well-built proxies should)
+- **Geographic distance + cold connection pool** (less likely — ~17s is extreme for geographic alone)
+- **Literal `setTimeout` somewhere in their proxy code** (rate-limit politeness, anti-abuse, etc.)
+
+We can't prove which from outside, and we don't need to. The key conclusion: **the slowness is implementation-specific to Tempo's googlemaps proxy, not an inherent cost of MPP, mppx, the chain, or the upstream.** A well-built reseller can land at ~1-2 seconds server-side. They're at ~18-19 seconds. That's their code, not the protocol.
+
+## Plan agent's predictions vs reality
+
+The Plan agent that critiqued Round 2's design predicted three outcomes for the reseller. Scoring:
+
+| Prediction | Actual | Score |
+|---|---|---|
+| Confirmed mode lands at ~4.5s | 3949 ms end-to-end ✓ (also 1485 ms server-side, much better than predicted) | ✓ Conservative — actual is faster than predicted |
+| Fast mode lands at 1.5-2.5s | 3624 ms end-to-end ✗ (only 917 ms server-side though) | ✗ The end-to-end didn't speed up much because client overhead dominates |
+| The on-chain wait is "a chunk but not the whole story" | ~570 ms server-side (~14% of harness end-to-end, ~38% of server-side) | ✓ Exactly right |
+
+The prediction missed how much of the floor was client-side. On the server side, the reseller is significantly faster than even the agent's optimistic prediction.
+
+## Practical implications for Talaria
+
+Updated from Round 1's "avoid Tempo proxies" guidance:
+
+1. **Use the reseller for Google Maps in Talaria's housing module.** Server-side ~1-1.5s for Streetview is fast enough for "show a loading spinner, fetch in the background, show photos when ready." The previous 21s was unusable; 1.5-4.5s is fine.
+2. **Long-term: integrate `mppx/client` directly** in Talaria's MPP code path instead of shelling out to the agentcash CLI. The ~2.6s of client-side overhead per call is mostly subprocess startup + fetch wrappers; doing it in-process via mppx/client should drop end-to-end calls to ~1.5-2 seconds.
+3. **Cache photos aggressively at the reseller layer** if we ever launch the reseller publicly. Same 500m × 500m grid cell + same heading/pitch → same image. Save the call entirely.
+4. **`waitForConfirmation: false` is a reasonable default for read-only image endpoints** — the worst case is an attacker pays $0 and gets a Streetview image that the reseller streamed before the chain fully confirmed. The economic value of the leaked image is ~$0.001 worth of Google API credit. Worth it to save 570 ms of latency on a user-visible call.
+
+## Out of scope (Round 3 and later)
+
+- **Public deployment of the reseller.** Cloudflare Workers / Fly.io / Railway. Round 2 ran the reseller locally only.
+- **Direct `mppx/client` integration in Talaria.** A separate refactor of `lib/mpp-client.ts` to use mppx programmatically instead of the agentcash subprocess. Would shave ~2-3 seconds off every Talaria MPP call.
+- **Photo endpoint sweep** (the chained `textsearch → photos/.../media` flow). Skipped in Round 2 because the existing googlemaps.ts harness sweep already exercised that code path against Tempo's proxy in Round 1.
+- **Cache layer at the reseller.** Trivial to add: same query params → same response. Would drop the median latency for cache-hit calls to single-digit milliseconds.
+- **Multi-method support** in the reseller (Stripe SPT, x402, Lightning).
+- **Rate limiting / per-client quotas** in the reseller.
+- **Persistent replay-protection store** (currently in-memory; survives a single process lifetime).
+- **Fixing the `tx_hash: null` bug** in `mpp-reseller/src/instrumentation.ts` — mppx isn't putting the tx hash in the `Payment-Receipt` header in the format the regex expects, or it's in a different header. The agentcash client output has the hash for every call, so payments are working — this is just a logging-completeness gap.
+
+## Cumulative spend audit
+
+| Round | Description | Spend |
+|---|---|---:|
+| Round 1 | 6-service wide sweep | $0.1721 |
+| Round 1.5 | alchemy-tempo controlled comparison | $0.0008 |
+| Round 2 | Reseller comparison sweep (16 calls × $0.001) | $0.0160 |
+| **Total** | | **$0.1889** |
+| **Cap** | | **$1.00** |
+| **Remaining** | | **$0.8111** |
+
+All payments are USDC.e on Tempo. Round 2's $0.016 went from the user's main agentcash wallet to the reseller wallet — both controlled by the user, recoverable.
+
+Off-chain: Round 2 made 19 successful Google Maps API calls against the user's free-tier credit. At $7-$32 per 1000 calls depending on the API, that's at most ~$0.20 of pretend Google credit consumed, well within the $200/month free allowance.

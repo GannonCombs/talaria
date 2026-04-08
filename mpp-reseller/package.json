@@ -1,0 +1,27 @@
+{
+  "name": "mpp-reseller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local MPP reseller for Google Maps endpoints. Round 2 of the MPP latency investigation.",
+  "scripts": {
+    "create-wallet": "tsx scripts/create-wallet.ts",
+    "phase0-smoke": "tsx scratch/phase0-static-402.ts",
+    "start": "node --env-file=.env --import tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "1.19.12",
+    "hono": "4.12.11",
+    "mppx": "0.4.12",
+    "viem": "2.47.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

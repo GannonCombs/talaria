@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Secrets — NEVER commit
+.env
+keys/
+keys/**
+
+# Logs
+logs/
+
+# Scratch / debug
+scratch/
+*.tsbuildinfo

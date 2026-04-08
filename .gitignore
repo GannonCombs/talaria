@@ -36,3 +36,11 @@ keys/
 # MPP latency harness — local test data only
 scripts/mpp-latency/logs/
 scripts/mpp-latency/reports/
+
+# MPP reseller (Round 2) — secrets and local data
+mpp-reseller/node_modules/
+mpp-reseller/.env
+mpp-reseller/keys/
+mpp-reseller/keys/**
+mpp-reseller/logs/
+mpp-reseller/scratch/

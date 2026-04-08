@@ -138,6 +138,63 @@ export const SERVICES: Record<string, CatalogEntry> = {
   // gmaps-place-photo is built dynamically inside sweeps/googlemaps.ts because
   // its URL depends on the textsearch response. No static catalog entry.
 
+  // ── Round 2: our own local mpp-reseller ──
+  // Same Google Maps upstreams as the gmaps-* entries above, but routed
+  // through the locally-hosted mpp-reseller (mpp-reseller/src/server.ts).
+  // Each endpoint is exposed in TWO modes:
+  //   confirmed = waitForConfirmation: true  (mppx default — matches Locus baseline)
+  //   fast      = waitForConfirmation: false (skip on-chain wait)
+  // The reseller listens on 127.0.0.1:8787 and must be running before any
+  // sweep against these entries.
+
+  'reseller-streetview-confirmed': {
+    config: {
+      id: 'reseller-streetview-confirmed',
+      proxyClass: 'self',
+      url: 'http://127.0.0.1:8787/maps/streetview?location=30.2672,-97.7431&size=600x400&fov=80&heading=70&pitch=0',
+      method: 'GET',
+      expectedCostUsd: 0.001,
+    },
+    subCapUsd: 0.02,
+    defaultSamples: 5,
+  },
+
+  'reseller-streetview-fast': {
+    config: {
+      id: 'reseller-streetview-fast',
+      proxyClass: 'self',
+      url: 'http://127.0.0.1:8787/fast/maps/streetview?location=30.2672,-97.7431&size=600x400&fov=80&heading=70&pitch=0',
+      method: 'GET',
+      expectedCostUsd: 0.001,
+    },
+    subCapUsd: 0.02,
+    defaultSamples: 5,
+  },
+
+  'reseller-textsearch-confirmed': {
+    config: {
+      id: 'reseller-textsearch-confirmed',
+      proxyClass: 'self',
+      url: 'http://127.0.0.1:8787/maps/place/textsearch/json?query=restaurants+in+Austin+TX',
+      method: 'GET',
+      expectedCostUsd: 0.001,
+    },
+    subCapUsd: 0.02,
+    defaultSamples: 3,
+  },
+
+  'reseller-textsearch-fast': {
+    config: {
+      id: 'reseller-textsearch-fast',
+      proxyClass: 'self',
+      url: 'http://127.0.0.1:8787/fast/maps/place/textsearch/json?query=restaurants+in+Austin+TX',
+      method: 'GET',
+      expectedCostUsd: 0.001,
+    },
+    subCapUsd: 0.02,
+    defaultSamples: 3,
+  },
+
   // ── x402 free reads (no payment, isolates protocol overhead) ──
 
   'agentres-availability': {
