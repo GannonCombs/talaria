@@ -54,6 +54,8 @@ export interface MarketStats {
 export interface Listing {
   id: number;
   address: string;
+  city: string | null;
+  state: string | null;
   zip: string;
   price: number;
   beds: number;
@@ -109,44 +111,60 @@ export async function fetchMarketStats(zip: string): Promise<MarketStats | null>
   return cached?.stats ?? null;
 }
 
-// READ-ONLY. Never makes a paid call. Always returns whatever is in the
-// SQLite cache. The MPP-spending refresh path is `refreshListingsFromMpp()`
-// below — it must be invoked explicitly (e.g. by a Refresh button), never
-// from a code path that runs on page load or browser reload.
-//
-// `zip` may be null when filtering by bookmarks (or other zip-agnostic
-// criteria). The cached SQL query handles both shapes.
-export async function fetchListings(
-  zip: string | null,
-  filters?: ListingFilters
-): Promise<Listing[]> {
-  return getCachedListings(zip, filters);
+export interface ListingLocation {
+  zip?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
-// EXPLICITLY-INVOKED ONLY. Costs $0.033 per call to RentCast via MPP.
-// Do not wire this into any auto-firing path (useEffect, page load,
-// GET endpoint that the UI calls on render). Refresh buttons, manual
-// API calls only.
-export async function refreshListingsFromMpp(zip: string): Promise<{
-  fetched: number;
-  cost: number;
-}> {
-  const data = callRentcast('/rentcast/sale-listings', {
-    zipCode: zip,
-    status: 'Active',
-    limit: 500,
-  });
-  const records: RentcastListing[] = Array.isArray(data) ? data : [];
+// READ-ONLY. Never makes a paid call. Always returns whatever is in the
+// SQLite cache. The MPP-spending refresh path is `refreshListingsForCity()`
+// — it must be invoked explicitly (e.g. by the auto-refresh-on-stale-cache
+// path), never from a code path that runs on every render.
+//
+// `location` may be empty (or all-null) when filtering by bookmarks across
+// the entire cache. The cached SQL query handles every combination.
+export async function fetchListings(
+  location: ListingLocation,
+  filters?: ListingFilters
+): Promise<Listing[]> {
+  return getCachedListings(location, filters);
+}
 
+export interface RefreshResult {
+  fetched: number;
+  pages: number;
+  cost: number;
+  truncated: boolean;
+}
+
+const PAGE_LIMIT = 500;
+// Hard ceiling: 60 pages × $0.033 = $1.98. Catastrophe cap, not the
+// expected spend. Real Austin refresh runs ~10-30 pages = $0.33-$0.99.
+const DEFAULT_MAX_PAGES = 60;
+const COST_PER_PAGE = 0.033;
+
+// In-process Promise lock. If a refresh is already running for any city,
+// callers await the in-flight Promise instead of starting their own. This
+// guards against two simultaneous /housing tabs both kicking off a refresh.
+let inflightRefresh: Promise<RefreshResult> | null = null;
+
+function upsertOnePage(
+  records: RentcastListing[],
+  fallbackCity: string,
+  fallbackState: string
+): number {
   const db = getDb();
   const upsert = db.prepare(
     `INSERT INTO housing_listings
-       (address, zip, price, beds, baths, sqft, lot_sqft, year_built,
-        hoa_monthly, listing_url, days_on_market, status, latitude,
-        longitude, last_seen, metadata)
+       (address, city, state, zip, price, beds, baths, sqft, lot_sqft,
+        year_built, hoa_monthly, listing_url, days_on_market, status,
+        latitude, longitude, last_seen, metadata)
      VALUES
-       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
      ON CONFLICT(address, zip) DO UPDATE SET
+       city = excluded.city,
+       state = excluded.state,
        price = excluded.price,
        beds = excluded.beds,
        baths = excluded.baths,
@@ -163,12 +181,15 @@ export async function refreshListingsFromMpp(zip: string): Promise<{
        metadata = excluded.metadata`
   );
 
+  let inserted = 0;
   const insertMany = db.transaction((rows: RentcastListing[]) => {
     for (const r of rows) {
       if (!r.formattedAddress || r.price == null) continue;
       upsert.run(
         r.formattedAddress,
-        r.zipCode ?? zip,
+        r.city ?? fallbackCity,
+        r.state ?? fallbackState,
+        r.zipCode ?? '',
         r.price,
         r.bedrooms ?? null,
         r.bathrooms ?? null,
@@ -191,25 +212,101 @@ export async function refreshListingsFromMpp(zip: string): Promise<{
           listingOffice: r.listingOffice?.name,
         })
       );
+      inserted++;
     }
   });
   insertMany(records);
+  return inserted;
+}
 
-  logMppTransaction({
-    service: 'RentCast',
-    module: 'housing',
-    endpoint: '/rentcast/sale-listings',
-    rail: 'tempo',
-    costUsd: 0.033,
-    metadata: { via: 'usdc', zipCode: zip, count: records.length },
-  });
+// EXPLICITLY-INVOKED ONLY (or via the auto-refresh path on stale cache).
+// Paginated city-wide RentCast call. Costs ~$0.033 per page; expected
+// real cost for greater Austin is $0.33-$0.99. Hard-capped at $1.98.
+//
+// The in-process Promise lock ensures concurrent callers all await the
+// same in-flight refresh instead of stacking calls. The route layer
+// adds a DB-backed cooldown on top to survive page reloads.
+export async function refreshListingsForCity(
+  city: string,
+  state: string,
+  opts?: { maxPages?: number }
+): Promise<RefreshResult> {
+  if (inflightRefresh) {
+    return inflightRefresh;
+  }
 
-  return { fetched: records.length, cost: 0.033 };
+  const maxPages = opts?.maxPages ?? DEFAULT_MAX_PAGES;
+
+  inflightRefresh = (async () => {
+    let totalFetched = 0;
+    let pageCount = 0;
+    let naturallyTerminated = false;
+    let offset = 0;
+
+    while (pageCount < maxPages) {
+      const data = callRentcast('/rentcast/sale-listings', {
+        city,
+        state,
+        status: 'Active',
+        limit: PAGE_LIMIT,
+        offset,
+      });
+      const records: RentcastListing[] = Array.isArray(data) ? data : [];
+      pageCount++;
+
+      const inserted = upsertOnePage(records, city, state);
+      totalFetched += inserted;
+
+      logMppTransaction({
+        service: 'RentCast',
+        module: 'housing',
+        endpoint: '/rentcast/sale-listings',
+        rail: 'tempo',
+        costUsd: COST_PER_PAGE,
+        metadata: {
+          via: 'usdc',
+          city,
+          state,
+          page: pageCount,
+          offset,
+          count: records.length,
+        },
+      });
+
+      // Termination: a non-full page means we hit the end of results.
+      // Track this explicitly so we can distinguish a natural finish on
+      // the Nth page from hitting the cap on the Nth page.
+      if (records.length < PAGE_LIMIT) {
+        naturallyTerminated = true;
+        break;
+      }
+
+      offset += PAGE_LIMIT;
+    }
+
+    return {
+      fetched: totalFetched,
+      pages: pageCount,
+      cost: pageCount * COST_PER_PAGE,
+      // Truncated only if the loop exited via the cap. If page #maxPages
+      // happened to be the last page (records < PAGE_LIMIT), we finished
+      // cleanly and the user has everything.
+      truncated: !naturallyTerminated,
+    };
+  })();
+
+  try {
+    return await inflightRefresh;
+  } finally {
+    inflightRefresh = null;
+  }
 }
 
 interface RentcastListing {
   id?: string;
   formattedAddress?: string;
+  city?: string;
+  state?: string;
   zipCode?: string;
   price?: number;
   bedrooms?: number;
@@ -270,17 +367,29 @@ function getCachedStats(zip: string): { stats: MarketStats; fetchedAt: string } 
   };
 }
 
-function getCachedListings(zip: string | null, filters?: ListingFilters): Listing[] {
+function getCachedListings(
+  location: ListingLocation,
+  filters?: ListingFilters
+): Listing[] {
   const db = getDb();
   // Always alias the listings table as `l` so the optional bookmarks JOIN
   // can disambiguate. Conditions all reference `l.column`.
-  // zip is optional — when omitted, the query spans all zips (used by the
-  // bookmarks-only filter so a bookmark in any zip is reachable).
+  // Location filters are all optional. When all-empty, the query spans
+  // every cached row (used by the bookmarks-only path so a bookmark
+  // anywhere is reachable).
   const conditions: string[] = [];
   const params: unknown[] = [];
-  if (zip) {
+  if (location.zip) {
     conditions.push('l.zip = ?');
-    params.push(zip);
+    params.push(location.zip);
+  }
+  if (location.city) {
+    conditions.push('l.city = ?');
+    params.push(location.city);
+  }
+  if (location.state) {
+    conditions.push('l.state = ?');
+    params.push(location.state);
   }
 
   if (filters?.minPrice) {
@@ -359,6 +468,8 @@ function mapListingRow(row: Record<string, unknown>): Listing {
   return {
     id: row.id as number,
     address: row.address as string,
+    city: (row.city as string | null) ?? null,
+    state: (row.state as string | null) ?? null,
     zip: row.zip as string,
     price: row.price as number,
     beds: row.beds as number,

@@ -15,6 +15,8 @@ export const HOUSING_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS housing_listings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     address TEXT NOT NULL,
+    city TEXT,
+    state TEXT,
     zip TEXT NOT NULL,
     price REAL NOT NULL,
     beds INTEGER,
@@ -38,6 +40,7 @@ export const HOUSING_TABLES_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_listings_zip ON housing_listings(zip);
+  CREATE INDEX IF NOT EXISTS idx_listings_city_state ON housing_listings(city, state);
   CREATE INDEX IF NOT EXISTS idx_listings_deal_score ON housing_listings(deal_score);
 
   CREATE TABLE IF NOT EXISTS housing_mortgage_rates (

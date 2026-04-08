@@ -91,7 +91,10 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   price: 8,
 };
 
-const TARGET_ZIPS = ['78745', '78704', '78749', '78748', '78731'];
+// Stale-cache threshold: refresh listings if the newest cached row was
+// last seen more than this many days ago. The cooldown protection
+// (server-side) prevents loops if a refresh fails.
+const LISTINGS_STALE_DAYS = 7;
 
 // Map legacy "tier" strings to numeric credit scores so any existing
 // `housing.credit_score_tier` pref from the old string-dropdown migrates
@@ -141,24 +144,29 @@ export default function HousingPage() {
       if (addressesWithCoords.length === 0) return;
 
       setIsoLoading(true);
-      const results: typeof isoPolygons = [];
-      for (const addr of addressesWithCoords) {
-        try {
-          const res = await fetch('/api/housing/isochrone', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lat: addr.lat, lng: addr.lng, minutes: addr.driveMinutes }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.polygon) {
-              results.push({ id: addr.id, color: addr.color, label: addr.label, polygon: data.polygon, driveMinutes: addr.driveMinutes });
+      try {
+        const results: typeof isoPolygons = [];
+        for (const addr of addressesWithCoords) {
+          try {
+            const res = await fetch('/api/housing/isochrone', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lat: addr.lat, lng: addr.lng, minutes: addr.driveMinutes }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.polygon) {
+                results.push({ id: addr.id, color: addr.color, label: addr.label, polygon: data.polygon, driveMinutes: addr.driveMinutes });
+              }
             }
-          }
-        } catch { /* skip failed */ }
+          } catch { /* skip failed */ }
+        }
+        setIsoPolygons(results);
+      } finally {
+        // Always clear the loading flag — otherwise an unexpected throw
+        // strands the overlay forever, which used to block pin clicks.
+        setIsoLoading(false);
       }
-      setIsoPolygons(results);
-      setIsoLoading(false);
     }
     fetchIsochrones();
   }, [isoFetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -291,30 +299,115 @@ export default function HousingPage() {
   }
 
   // Listings: re-runs whenever filters change. When bookmarksOnly is on,
-  // we issue a SINGLE zipless request so bookmarks across any zip are
-  // visible — not just bookmarks that happen to fall in TARGET_ZIPS.
+  // we issue a single locationless request so bookmarks anywhere in the
+  // cache are reachable. Otherwise we issue a single city+state query.
   const loadListings = useCallback(async () => {
+    const params = buildFilterParams();
     if (filters.bookmarksOnly) {
-      const params = buildFilterParams();
       params.set('bookmarksOnly', 'true');
-      const res = await fetch(`/api/housing/listings?${params}`);
-      if (res.ok) setListings(await res.json());
-      return;
+    } else {
+      params.set('city', city);
+      params.set('state', stateCode);
     }
-    const allListings: ListingData[] = [];
-    for (const zip of TARGET_ZIPS) {
-      const params = buildFilterParams();
-      params.set('zip', zip);
-      const res = await fetch(`/api/housing/listings?${params}`);
-      if (res.ok) allListings.push(...(await res.json()));
-    }
-    setListings(allListings);
+    const res = await fetch(`/api/housing/listings?${params}`);
+    if (res.ok) setListings(await res.json());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters]);
+  }, [filters, city, stateCode]);
 
   useEffect(() => {
     loadListings();
   }, [loadListings]);
+
+  // Auto-refresh on stale cache. On mount (and when the configured city
+  // changes), check listings-meta to see if we have fresh data. If not,
+  // POST to refresh-listings — server enforces the cooldown so this is
+  // safe to call on every reload. After the refresh resolves (or skips),
+  // re-run loadListings to pick up the new data.
+  const [refreshStatus, setRefreshStatus] = useState<{
+    active: boolean;
+    message: string | null;
+  }>({ active: false, message: null });
+  const refreshTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (refreshTriggeredRef.current) return;
+    if (!city || !stateCode) return;
+    refreshTriggeredRef.current = true;
+
+    (async () => {
+      try {
+        const metaRes = await fetch(
+          `/api/housing/listings-meta?city=${encodeURIComponent(city)}&state=${encodeURIComponent(stateCode)}`
+        );
+        if (!metaRes.ok) return;
+        const meta = (await metaRes.json()) as {
+          rowCount: number;
+          newestLastSeen: string | null;
+        };
+
+        // Decide: stale?
+        const staleMs = LISTINGS_STALE_DAYS * 24 * 60 * 60 * 1000;
+        let isStale = false;
+        if (meta.rowCount === 0) {
+          isStale = true;
+        } else if (meta.newestLastSeen) {
+          // SQLite returns 'YYYY-MM-DD HH:MM:SS' (UTC, no TZ designator).
+          // Append Z to force UTC parsing — otherwise it's read as local.
+          const newestMs = new Date(meta.newestLastSeen.replace(' ', 'T') + 'Z').getTime();
+          isStale = Date.now() - newestMs > staleMs;
+        }
+
+        if (!isStale) return;
+
+        setRefreshStatus({
+          active: true,
+          message: `Refreshing listings for ${city}, ${stateCode}…`,
+        });
+
+        const refreshRes = await fetch('/api/housing/refresh-listings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ city, state: stateCode }),
+        });
+        const refreshData = await refreshRes.json();
+
+        if (refreshData.skipped) {
+          if (refreshData.skippedReason === 'cooldown') {
+            const m = refreshData.cooldownMinutesRemaining;
+            setRefreshStatus({
+              active: false,
+              message: `Auto-refresh paused — last attempt ${60 - m}m ago. Retry in ${m}m.`,
+            });
+          } else {
+            setRefreshStatus({ active: false, message: null });
+          }
+        } else if (refreshData.error) {
+          setRefreshStatus({
+            active: false,
+            message: `Refresh failed: ${refreshData.detail ?? refreshData.error}`,
+          });
+        } else {
+          const truncatedNote = refreshData.truncated
+            ? ' (more results exist beyond the safety cap)'
+            : '';
+          setRefreshStatus({
+            active: false,
+            message: `Refreshed ${refreshData.fetched.toLocaleString()} listings across ${refreshData.pages} pages for $${refreshData.cost.toFixed(3)}${truncatedNote}`,
+          });
+          // Auto-clear the success toast after 6 seconds.
+          setTimeout(() => setRefreshStatus({ active: false, message: null }), 6000);
+          // Reload listings to pick up the new rows.
+          loadListings();
+        }
+      } catch (err) {
+        setRefreshStatus({
+          active: false,
+          message: `Refresh error: ${err instanceof Error ? err.message : 'unknown'}`,
+        });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [city, stateCode]);
 
   // Static-ish data: scores + predictions. Loaded once on mount.
   // Doesn't need to re-run when filters change.
@@ -431,10 +524,33 @@ export default function HousingPage() {
             isoIntersection={isoIntersection}
             onListingClick={setSelectedListingId}
           />
+          {/* Refresh status banner — floats above the map, centered top.
+              Active state shows a pill with the in-flight message; inactive
+              with a non-null message acts as a transient toast. */}
+          {refreshStatus.message && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1500] pointer-events-none">
+              <div
+                className={`px-4 py-2 border text-xs font-mono shadow-lg ${
+                  refreshStatus.active
+                    ? 'bg-surface-container border-primary text-primary'
+                    : 'bg-surface-container border-outline text-on-surface'
+                }`}
+              >
+                {refreshStatus.active && (
+                  <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse mr-2 align-middle" />
+                )}
+                {refreshStatus.message}
+              </div>
+            </div>
+          )}
           {isoLoading && (
-            <div className="absolute inset-0 z-[2000] bg-background/70 flex items-center justify-center">
-              <div className="bg-surface-container border border-outline px-8 py-4 text-on-surface text-sm">
-                Please Wait...
+            // pointer-events-none on the wrapper so the loading indicator
+            // doesn't block pin clicks while isochrones are still fetching
+            // (Valhalla can take 10+ seconds and used to silently swallow
+            // every click on the map underneath).
+            <div className="absolute inset-0 z-[2000] flex items-center justify-center pointer-events-none">
+              <div className="bg-surface-container border border-outline px-8 py-4 text-on-surface text-sm shadow-lg">
+                Loading isochrones…
               </div>
             </div>
           )}

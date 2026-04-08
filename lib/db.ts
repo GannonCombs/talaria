@@ -77,7 +77,10 @@ function buildSchema(db: Database.Database): void {
 }
 
 function resetDatabase(db: Database.Database): void {
-  // Preserve wallet keys across resets
+  // Preserve wallet keys across resets. Note: real PKs live in
+  // ~/.agentcash/, NOT in talaria.db. This pref only caches a derived
+  // public Solana address for display, but we keep the same shape so
+  // any future cached wallet metadata is also preserved.
   let walletKeys: { key: string; value: string }[] = [];
   try {
     walletKeys = db
@@ -87,15 +90,22 @@ function resetDatabase(db: Database.Database): void {
     // Table may not exist yet
   }
 
-  // Drop all tables
-  const tables = db
-    .prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-    )
-    .all() as { name: string }[];
+  // Disable foreign key enforcement during drop. Otherwise dropping a
+  // referenced table (e.g. housing_listings) before its referrers (e.g.
+  // housing_tracked) raises SQLITE_CONSTRAINT_FOREIGNKEY. Re-enabled below.
+  db.pragma('foreign_keys = OFF');
+  try {
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+      )
+      .all() as { name: string }[];
 
-  for (const { name } of tables) {
-    db.exec(`DROP TABLE IF EXISTS "${name}"`);
+    for (const { name } of tables) {
+      db.exec(`DROP TABLE IF EXISTS "${name}"`);
+    }
+  } finally {
+    db.pragma('foreign_keys = ON');
   }
 
   // Store wallet keys to restore after rebuild
