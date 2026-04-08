@@ -87,6 +87,23 @@ export const SERVICES: Record<string, CatalogEntry> = {
     defaultSamples: 10, // cheapest — clean control distribution
   },
 
+  // Same upstream as alchemy-rpc, but routed through Tempo's own proxy.
+  // This is the controlled experiment for "is Tempo's proxy class
+  // structurally slow?" — same Alchemy eth_blockNumber call, same chain,
+  // only the proxy operator differs.
+  'alchemy-tempo': {
+    config: {
+      id: 'alchemy-tempo',
+      proxyClass: 'tempo',
+      url: 'https://alchemy.mpp.tempo.xyz/eth-mainnet/v2',
+      method: 'POST',
+      body: { jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 },
+      expectedCostUsd: 0.0001, // 10× cheaper than the direct alchemy proxy
+    },
+    subCapUsd: 0.02,
+    defaultSamples: 10,
+  },
+
   // ── Tempo-hosted proxies (the suspect class — Google Maps lives here) ──
   // URLs from yesterday's session. Bodies marked TBD will be discovered
   // empirically on the first attempt; the sweep handles 4xx gracefully.
