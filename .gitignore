@@ -32,3 +32,7 @@ keys/
 
 # Claude
 .claude/
+
+# MPP latency harness — local test data only
+scripts/mpp-latency/logs/
+scripts/mpp-latency/reports/
