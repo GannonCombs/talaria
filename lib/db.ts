@@ -39,12 +39,42 @@ function initializeDatabase(db: Database.Database): void {
   const currentVersion = db
     .prepare('SELECT version FROM schema_version LIMIT 1')
     .get() as { version: number } | undefined;
+  const fromVersion = currentVersion?.version ?? 0;
 
-  if (!currentVersion || currentVersion.version < SCHEMA_VERSION) {
-    // Schema changed — drop all tables and rebuild
-    resetDatabase(db);
-    buildSchema(db);
+  if (fromVersion < SCHEMA_VERSION) {
+    // Try additive ALTER-based migration first. If we can walk version
+    // by version applying small changes, we preserve cached data (e.g.
+    // the ~$0.33 of Austin RentCast listings). Falls back to a full
+    // drop-and-rebuild if any migration step throws.
+    try {
+      runMigrations(db, fromVersion);
+      db.prepare(
+        'INSERT OR REPLACE INTO schema_version (version) VALUES (?)'
+      ).run(SCHEMA_VERSION);
+    } catch (err) {
+      console.warn(
+        `[db] Additive migration ${fromVersion}→${SCHEMA_VERSION} failed, falling back to drop-and-rebuild:`,
+        err instanceof Error ? err.message : err
+      );
+      resetDatabase(db);
+      buildSchema(db);
+    }
   }
+}
+
+// Per-version migration steps. Each entry brings the schema FROM the
+// listed version TO the next one. Steps are applied in order. Add new
+// steps as the schema evolves; never edit a published step.
+//
+// Currently empty — all schema changes prior to v6 used the
+// drop-and-rebuild path. New schema versions starting from v7 should
+// add additive migrations here so cached data (especially the ~$0.33
+// of RentCast listings) survives.
+function runMigrations(db: Database.Database, fromVersion: number): void {
+  // No-op when fromVersion >= SCHEMA_VERSION. Future migrations go
+  // here as `if (fromVersion < N) { ... }` blocks in ascending order.
+  void db;
+  void fromVersion;
 }
 
 function buildSchema(db: Database.Database): void {

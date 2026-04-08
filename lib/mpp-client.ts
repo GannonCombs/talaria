@@ -1,7 +1,135 @@
+// Server-side MPP client. Wraps mppx/client + viem so any server route
+// can call paid MPP endpoints natively. The agentcash CLI is a JSON-only
+// stdout tool — it can't pass through binary response bodies (images,
+// audio, video). This module talks to MPP services via the standard
+// `mppx/client` library and returns real Response objects, so callers
+// can `.arrayBuffer()` or `.blob()` the result.
+//
+// Strict server-only — never import from a client component. The wallet
+// private key is read from `~/.agentcash/wallet.json` (the same location
+// agentcash uses) and never leaves Node.
+
+// Server-only by virtue of node:fs/path/os imports — Next won't bundle
+// these to the client. Do not import this module from client components.
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { Mppx, tempo } from 'mppx/client';
+import { privateKeyToAccount } from 'viem/accounts';
 import { getDb } from './db';
 import { logMppTransaction } from './mpp';
 
-// ── Cache ──
+const AGENTCASH_WALLET_PATH = path.join(os.homedir(), '.agentcash', 'wallet.json');
+
+// ── DIAGNOSTIC: per-fetch timing wrapper ─────────────────────────────────
+//
+// We installed this to investigate why a single Street View call was
+// taking 16+ seconds. mppx + viem make multiple fetch() calls under
+// the hood (RPC submits, receipt polls, the resource roundtrip itself)
+// and the only way to see the breakdown is to wrap globalThis.fetch
+// before mppx is built.
+//
+// Each fetch logs: method, host+path (truncated), duration in ms,
+// and HTTP status. Looks like:
+//   [fetch:1843ms 200] POST rpc.tempo.xyz/
+//   [fetch:489ms 200] GET googlemaps.mpp.tempo.xyz/maps/streetview?...
+//
+// Wrapper is idempotent — second import doesn't re-wrap.
+//
+// Once we know where the time goes, this can stay (it's noise but cheap)
+// or be removed.
+
+const FETCH_WRAPPED = Symbol.for('talaria.mpp.fetch.wrapped');
+type WrappableGlobal = typeof globalThis & { [FETCH_WRAPPED]?: boolean };
+
+function installFetchTiming(): void {
+  const g = globalThis as WrappableGlobal;
+  if (g[FETCH_WRAPPED]) return;
+  const original = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    const method = init?.method ?? 'GET';
+
+    // Compact display: drop scheme, truncate query strings to keep
+    // logs scannable.
+    let display = url.replace(/^https?:\/\//, '');
+    if (display.length > 80) display = display.slice(0, 77) + '...';
+
+    const start = performance.now();
+    let status: number | string = '?';
+    try {
+      const res = await original(input, init);
+      status = res.status;
+      return res;
+    } finally {
+      const ms = (performance.now() - start).toFixed(0).padStart(5, ' ');
+      console.log(`[fetch:${ms}ms ${status}] ${method} ${display}`);
+    }
+  }) as typeof fetch;
+  g[FETCH_WRAPPED] = true;
+}
+
+// Install before any mppx code runs.
+installFetchTiming();
+
+// ────────────────────────────────────────────────────────────────────────
+
+interface AgentCashWallet {
+  privateKey: `0x${string}`;
+  address: string;
+}
+
+let _client: ReturnType<typeof buildClient> | null = null;
+
+function loadWallet(): AgentCashWallet {
+  const raw = fs.readFileSync(AGENTCASH_WALLET_PATH, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (typeof parsed?.privateKey !== 'string' || !parsed.privateKey.startsWith('0x')) {
+    throw new Error('Invalid wallet.json format at ' + AGENTCASH_WALLET_PATH);
+  }
+  return parsed as AgentCashWallet;
+}
+
+function buildClient() {
+  const wallet = loadWallet();
+  const account = privateKeyToAccount(wallet.privateKey);
+  return Mppx.create({
+    polyfill: false,
+    methods: [tempo({ account })],
+  });
+}
+
+function getMppxClient() {
+  if (!_client) _client = buildClient();
+  return _client;
+}
+
+// Real Response object — caller chooses how to read the body. Use this
+// for endpoints that return binary (images, audio, video) or for any
+// case where you want full control over the response.
+//
+// Throws if the wallet file is missing or unreadable, if mppx fails
+// to negotiate payment, or if the server returns a non-OK status.
+export async function paidFetch(
+  url: string,
+  init?: RequestInit
+): Promise<Response> {
+  const client = getMppxClient();
+  return client.fetch(url, init);
+}
+
+// ── Cache (legacy JSON-call helper used by mapbox.ts) ──
+//
+// Kept for backward compatibility with existing call sites. New code
+// that needs binary or fine-grained control should use paidFetch directly.
 
 interface CacheEntry {
   cache_key: string;
@@ -22,7 +150,6 @@ export function getCached(cacheKey: string): string | null {
 
   if (!row) return null;
 
-  // Check expiration
   if (row.expires_at) {
     const expires = new Date(row.expires_at).getTime();
     if (Date.now() > expires) {
@@ -48,99 +175,6 @@ function setCache(
   ).run(cacheKey, endpoint, response, costUsd, expiresAt);
 }
 
-// ── MPP Payment Flow ──
-
-interface MppChallenge {
-  challengeId: string;
-  method: string;
-  intent: string;
-  amount: string;
-  currency: string;
-  chainId: number;
-  recipient: string;
-  realm: string;
-}
-
-function parseWwwAuthenticate(header: string): MppChallenge | null {
-  // Parse: Payment id="...", realm="...", method="...", intent="...", request="..."
-  const getId = (s: string) => s.match(/id="([^"]+)"/)?.[1] ?? '';
-  const getMethod = (s: string) => s.match(/method="([^"]+)"/)?.[1] ?? '';
-  const getIntent = (s: string) => s.match(/intent="([^"]+)"/)?.[1] ?? '';
-  const getRealm = (s: string) => s.match(/realm="([^"]+)"/)?.[1] ?? '';
-  const getRequest = (s: string) => s.match(/request="([^"]+)"/)?.[1] ?? '';
-
-  const method = getMethod(header);
-  const intent = getIntent(header);
-
-  // SAFETY: refuse session intents
-  if (intent === 'session') {
-    console.error('MPP: Refusing session intent — streaming payments not supported');
-    return null;
-  }
-
-  // Decode the request field (base64url JSON)
-  const requestB64 = getRequest(header);
-  if (!requestB64) return null;
-
-  try {
-    const decoded = JSON.parse(Buffer.from(requestB64, 'base64url').toString());
-    return {
-      challengeId: getId(header),
-      method,
-      intent,
-      amount: decoded.amount,
-      currency: decoded.currency,
-      chainId: decoded.methodDetails?.chainId ?? 0,
-      recipient: decoded.recipient,
-      realm: getRealm(header),
-    };
-  } catch {
-    return null;
-  }
-}
-
-// Sign and send a USDC.e transfer on Tempo to pay the MPP challenge
-async function payChallenge(challenge: MppChallenge): Promise<string> {
-  const fs = await import('fs');
-  const path = await import('path');
-  const { ethers } = await import('ethers');
-
-  // Read our private key
-  const pkFile = path.join(process.cwd(), 'keys', 'wallet.key');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(pkFile, 'utf8').trim();
-  } catch {
-    throw new Error('No wallet key found');
-  }
-
-  // Handle old JSON format
-  let evmKey: string;
-  try {
-    evmKey = JSON.parse(raw).evm;
-  } catch {
-    evmKey = raw;
-  }
-
-  // Connect to Tempo RPC
-  const provider = new ethers.JsonRpcProvider('https://rpc.tempo.xyz', {
-    name: 'tempo',
-    chainId: 4217,
-  });
-  const wallet = new ethers.Wallet(evmKey, provider);
-
-  // ERC-20 transfer to the recipient
-  const erc20Abi = ['function transfer(address to, uint256 amount) returns (bool)'];
-  const token = new ethers.Contract(challenge.currency, erc20Abi, wallet);
-
-  const tx = await token.transfer(challenge.recipient, BigInt(challenge.amount));
-  const receipt = await tx.wait();
-
-  return receipt.hash;
-}
-
-// ── Public API ──
-
 export interface CachedMppCallOptions {
   url: string;
   method?: string;
@@ -152,81 +186,52 @@ export interface CachedMppCallOptions {
   expiresInDays?: number | null; // null = never expires
 }
 
+// JSON-only convenience wrapper around paidFetch + caching. For text
+// endpoints (geocoding, search, etc.). Returns parsed JSON.
 export async function cachedMppCall(opts: CachedMppCallOptions): Promise<unknown> {
-  // 1. Check cache
   const cached = getCached(opts.cacheKey);
   if (cached) {
     return JSON.parse(cached);
   }
 
-  // 2. Make the initial request — expect 402
-  const initialRes = await fetch(opts.url, {
+  const res = await paidFetch(opts.url, {
     method: opts.method ?? 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
-    signal: AbortSignal.timeout(15000),
   });
 
-  // If not 402, return the response directly (might be an error or free endpoint)
-  if (initialRes.status !== 402) {
-    const data = await initialRes.json();
-    return data;
+  if (!res.ok) {
+    throw new Error(`MPP: ${opts.url} returned ${res.status}`);
   }
 
-  // 3. Parse the 402 challenge
-  const wwwAuth = initialRes.headers.get('www-authenticate') ?? '';
-  const challenge = parseWwwAuthenticate(wwwAuth);
-
-  if (!challenge) {
-    // Try parsing from body (some merchants put it there)
-    const body = await initialRes.json();
-    throw new Error(`MPP: Could not parse challenge from ${opts.url}: ${JSON.stringify(body).substring(0, 200)}`);
-  }
-
-  // 4. Calculate cost for logging
-  const costUsd = Number(challenge.amount) / 1e6; // USDC has 6 decimals
-
-  // 5. Pay the challenge
-  const txHash = await payChallenge(challenge);
-
-  // 6. Retry the request with the payment credential
-  const retryRes = await fetch(opts.url, {
-    method: opts.method ?? 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Payment ${txHash}`,
-    },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!retryRes.ok) {
-    throw new Error(`MPP: Retry failed with ${retryRes.status} after payment`);
-  }
-
-  const data = await retryRes.json();
+  const data = await res.json();
   const responseStr = JSON.stringify(data);
 
-  // 7. Cache the response
+  // Reading the cost from the X-Payment-Receipt header would be cleaner
+  // but mppx exposes it via Receipt.fromResponse(). For now we trust the
+  // caller to know the price; pass it via metadata if needed.
+  // We'll log a placeholder cost of 0 here and let direct paidFetch
+  // callers do their own logMppTransaction with the real cost.
   const expiresAt = opts.expiresInDays !== undefined && opts.expiresInDays !== null
     ? new Date(Date.now() + opts.expiresInDays * 24 * 60 * 60 * 1000).toISOString()
     : null;
-  setCache(opts.cacheKey, opts.endpoint, responseStr, costUsd, expiresAt);
+  setCache(opts.cacheKey, opts.endpoint, responseStr, 0, expiresAt);
 
-  // 8. Log the transaction
   logMppTransaction({
     service: opts.service,
     module: opts.module,
     endpoint: opts.endpoint,
     rail: 'tempo',
-    costUsd,
-    metadata: { via: 'usdc', txHash, cacheKey: opts.cacheKey },
+    costUsd: 0, // legacy path doesn't surface the actual price
+    metadata: { via: 'usdc', cacheKey: opts.cacheKey },
   });
 
   return data;
 }
 
-// Get the cost of an MPP call without paying (reads the 402 challenge)
+// Preview the cost of an MPP endpoint without paying. Reads the 402
+// challenge and decodes the amount. Returns null if the endpoint is
+// free, doesn't speak MPP, or refuses to issue a challenge.
 export async function previewMppCost(url: string, body?: Record<string, unknown>): Promise<{
   costUsd: number;
   intent: string;
@@ -243,13 +248,17 @@ export async function previewMppCost(url: string, body?: Record<string, unknown>
     if (res.status !== 402) return null;
 
     const wwwAuth = res.headers.get('www-authenticate') ?? '';
-    const challenge = parseWwwAuthenticate(wwwAuth);
-    if (!challenge) return null;
+    // Quick parse — just enough to surface cost in the UI before paying.
+    const intent = wwwAuth.match(/intent="([^"]+)"/)?.[1] ?? '';
+    const method = wwwAuth.match(/method="([^"]+)"/)?.[1] ?? '';
+    const requestB64 = wwwAuth.match(/request="([^"]+)"/)?.[1];
+    if (!requestB64) return null;
+    const decoded = JSON.parse(Buffer.from(requestB64, 'base64url').toString());
 
     return {
-      costUsd: Number(challenge.amount) / 1e6,
-      intent: challenge.intent,
-      method: challenge.method,
+      costUsd: Number(decoded.amount) / 1e6,
+      intent,
+      method,
     };
   } catch {
     return null;

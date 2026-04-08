@@ -30,6 +30,9 @@ next-env.d.ts
 # Wallet keys
 keys/
 
+# Cached MPP-fetched listing photos (server-side disk cache)
+public/listing-photos/
+
 # Claude
 .claude/
 

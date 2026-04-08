@@ -146,6 +146,33 @@ export default function ListingDrawer({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        {/* Listing photo. Lazy-fetched on demand from /api/housing/listing-photo/<id>.
+            Costs ~$0.039 the first time we open this listing's drawer (Google
+            Maps text-search + place photo OR Street View fallback) and is
+            cached on disk forever after. The img tag triggers the fetch
+            via the browser's normal resource loader; the server route
+            handles the MPP plumbing. The dark background prevents layout
+            shift while the image loads or in the no-imagery case. */}
+        <div className="relative w-full aspect-[8/5] bg-surface-container-low border border-outline overflow-hidden">
+          {/* Plain <img> is intentional. next/image would try to optimize
+              this URL at build time, but it's dynamic by definition —
+              the route fetches the bytes from MPP on demand and caches
+              them on disk. The browser already caches the served bytes
+              forever via the route's Cache-Control header. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/housing/listing-photo/${listing.id}`}
+            alt={listing.address}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              // Hide on 404 (no imagery available); the surrounding box
+              // stays as a quiet placeholder.
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        </div>
+
         {/* Address + details */}
         <div>
           <h2 className="text-lg font-bold text-on-surface tracking-tight">
