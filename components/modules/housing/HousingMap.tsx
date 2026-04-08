@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -9,6 +9,7 @@ import {
   Polygon,
   Tooltip,
   useMap,
+  useMapEvents,
 } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { FeatureCollection } from 'geojson';
@@ -16,6 +17,7 @@ import {
   AUSTIN_CENTER,
   DEFAULT_ZOOM,
 } from '@/lib/modules/housing/geodata';
+import { findNearestPinId } from '@/lib/modules/housing/pin-hittest';
 
 interface ListingPin {
   id: number;
@@ -66,8 +68,13 @@ const PIN_COLOR_SKY = '#38bdf8';
 const PIN_COLOR = PIN_COLOR_TEAL;
 
 function getPinRadius(dealScore: number | null): number {
-  if (dealScore === null) return 6;
-  return 5 + (dealScore / 100) * 4;
+  // Slightly larger than the SVG-mode default (was 6) to compensate for
+  // canvas anti-aliasing — small canvas circles look fuzzier than small
+  // SVG circles, so a couple extra pixels per pin restores the polished
+  // look without affecting click hit-testing (the delegated handler uses
+  // its own grace radius).
+  if (dealScore === null) return 7;
+  return 6 + (dealScore / 100) * 4;
 }
 
 // Map controls
@@ -125,6 +132,56 @@ function MapResizer() {
   return null;
 }
 
+// Delegated map-level click handler. Canvas-mode CircleMarkers don't
+// reliably fire per-marker click events in react-leaflet 5 + leaflet
+// 1.9, and even when they do the hit boxes are exactly the visual
+// circle (no padding), so users miss tiny pins constantly. We solve
+// both by listening on the map itself and finding the nearest pin
+// within a small grace radius. Reads listings + onListingClick from
+// refs so the handler closure stays valid across re-renders.
+const PIN_GRACE_PX = 12;
+
+function ListingClickHandler({
+  listings,
+  onListingClick,
+}: {
+  listings: ListingPin[];
+  onListingClick?: (id: number) => void;
+}) {
+  const listingsRef = useRef(listings);
+  const onListingClickRef = useRef(onListingClick);
+
+  useEffect(() => {
+    listingsRef.current = listings;
+  }, [listings]);
+
+  useEffect(() => {
+    onListingClickRef.current = onListingClick;
+  }, [onListingClick]);
+
+  useMapEvents({
+    click(e) {
+      const map = e.target;
+      const clickPoint = map.latLngToContainerPoint(e.latlng);
+      // 12px grace ≈ twice the visual pin radius (6-7px). Generous
+      // enough for near-misses, tight enough that two overlapping
+      // pins still resolve to the closer one.
+      const pins = listingsRef.current
+        .filter((l) => l.latitude != null && l.longitude != null)
+        .map((l) => {
+          const p = map.latLngToContainerPoint([l.latitude, l.longitude]);
+          return { id: l.id, x: p.x, y: p.y };
+        });
+      const hitId = findNearestPinId(clickPoint.x, clickPoint.y, pins, PIN_GRACE_PX);
+      if (hitId !== null) {
+        onListingClickRef.current?.(hitId);
+      }
+    },
+  });
+
+  return null;
+}
+
 // Style each Census tract — for now, a uniform teal tint.
 // Round 3 will color by price trend (green/red).
 function tractStyle(): Record<string, unknown> {
@@ -165,6 +222,22 @@ export default function HousingMap({
     }
   }, [showFloodZones, floodData]);
 
+  // Gate the MapContainer on listings being populated. Otherwise on cold
+  // direct-load, MapContainer mounts with an empty pin array, and when
+  // listings populates a moment later the new CircleMarkers attach
+  // event handlers during a later commit cycle that doesn't always
+  // succeed. Forcing MapContainer to wait until pins exist guarantees
+  // every marker's click handler is registered during the initial mount.
+  if (listings.length === 0) {
+    return (
+      <div className="relative w-full h-full bg-surface flex items-center justify-center">
+        <div className="text-on-surface-variant text-sm font-mono">
+          Loading map…
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full">
       <MapControls
@@ -182,8 +255,18 @@ export default function HousingMap({
         className="w-full h-full"
         style={{ background: '#0d1117' }}
         zoomControl={false}
+        // Render all vector layers (CircleMarkers, GeoJSON polygons) to a
+        // single <canvas> instead of individual SVG nodes. With ~5k pins
+        // plus thousands of Census tract polylines, SVG mode produces a
+        // ~10k-node DOM that the browser can't lay out fast enough — the
+        // main thread is blocked for 30+ seconds on initial render and
+        // every interaction (including click handler attachment) is
+        // queued behind it. Canvas mode collapses all of that into one
+        // GPU-accelerated draw call.
+        preferCanvas={true}
       >
         <MapResizer />
+        <ListingClickHandler listings={listings} onListingClick={onListingClick} />
 
         <TileLayer
           url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
@@ -279,20 +362,18 @@ export default function HousingMap({
           </>
         )}
 
-        {/* Listing pins */}
+        {/* Listing pins. Click handling is delegated to ListingClickHandler
+            above — per-marker handlers are unreliable in canvas mode. */}
         {listings.map((listing) => (
           <CircleMarker
             key={listing.id}
             center={[listing.latitude, listing.longitude]}
             radius={getPinRadius(listing.dealScore)}
             pathOptions={{
-              color: '#0d1117',
+              color: '#ffffff',
               fillColor: PIN_COLOR,
-              fillOpacity: 0.95,
+              fillOpacity: 1,
               weight: 1.5,
-            }}
-            eventHandlers={{
-              click: () => onListingClick?.(listing.id),
             }}
           >
             <Tooltip

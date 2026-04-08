@@ -152,7 +152,7 @@ export default function ListingDrawer({
             {listing.address}
           </h2>
           <div className="text-xs text-on-surface-variant font-mono mt-1">
-            {listing.zip} · Built {listing.yearBuilt}
+            {listing.yearBuilt != null ? `Built ${listing.yearBuilt}` : 'Year built —'}
           </div>
           <div className="flex gap-4 mt-2 text-sm text-on-surface-variant">
             <span>{listing.beds ?? '?'} bd</span>
