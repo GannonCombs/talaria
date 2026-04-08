@@ -24,8 +24,16 @@ export interface UpstreamResult {
   redactedUrl: string;
 }
 
-function redactKey(url: string): string {
-  return url.replace(/(\bkey=)[^&]+/g, '$1REDACTED');
+/**
+ * Replace `key=...` query param values with `REDACTED` so the API key
+ * never lands in logs, NDJSON, or stdout. Exported for testing.
+ *
+ * The character class `[^&#]+` stops at `&` (next param) AND `#` (fragment)
+ * so a URL like `https://x.com/path?key=AIza...#frag` becomes
+ * `https://x.com/path?key=REDACTED#frag` rather than swallowing the fragment.
+ */
+export function redactKey(url: string): string {
+  return url.replace(/(\bkey=)[^&#]+/g, '$1REDACTED');
 }
 
 function timeoutSignal(ms: number): AbortSignal {

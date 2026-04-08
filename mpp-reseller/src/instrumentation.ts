@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Context, MiddlewareHandler } from 'hono';
+import { Receipt } from 'mppx';
 import { getConfig } from './config.js';
 
 export type PhaseName = 'T0' | 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6';
@@ -95,7 +96,7 @@ function writeRecord(record: RequestRecord): void {
 
 // ── Hono context variables ──────────────────────────────────────────────────
 
-interface PhaseSlot {
+export interface PhaseSlot {
   T0?: number;
   T1?: number;
   T2?: number;
@@ -103,6 +104,30 @@ interface PhaseSlot {
   T4?: number;
   T5?: number;
   T6?: number;
+}
+
+/**
+ * Pure function: convert raw T0..T6 timestamps into the per-phase delta
+ * structure used in the NDJSON record. Missing markers cascade forward
+ * (e.g. an unpaid 402 has only T0/T6, so T1..T5 = T0). Exported for testing.
+ */
+export function computePhases(slot: PhaseSlot): RequestRecord['phases_ms'] {
+  const T0 = slot.T0 ?? 0;
+  const T1 = slot.T1 ?? T0;
+  const T2 = slot.T2 ?? T1;
+  const T3 = slot.T3 ?? T2;
+  const T4 = slot.T4 ?? T3;
+  const T5 = slot.T5 ?? T4;
+  const T6 = slot.T6 ?? T5;
+  return {
+    outer_overhead: Math.round(T1 - T0),
+    pre_upstream: Math.round(T2 - T1),
+    upstream_ttfb: Math.round(T3 - T2),
+    upstream_body: Math.round(T4 - T3),
+    handler_finish: Math.round(T5 - T4),
+    receipt_attach: Math.round(T6 - T5),
+    total: Math.round(T6 - T0),
+  };
 }
 
 interface InstrumentationCtx {
@@ -181,22 +206,20 @@ export function timed(label: string, mode: 'confirmed' | 'fast' | 'free'): Middl
 
     instr.phases.T6 = performance.now();
 
-    // Capture tx hash from the Payment-Receipt header if mppx attached one
+    // Capture tx hash from the Payment-Receipt header. The header is a
+    // base64url-encoded JSON receipt (not a raw hash) — use mppx's own
+    // deserializer to parse it. The tx hash is in the `reference` field
+    // for tempo charge receipts.
     const receiptHeader = c.res.headers.get('payment-receipt');
     if (receiptHeader && !instr.txHash) {
-      // Receipt format varies; try to extract a 0x... hash
-      const m = receiptHeader.match(/0x[a-fA-F0-9]{64}/);
-      if (m) instr.txHash = m[0];
+      try {
+        const receipt = Receipt.deserialize(receiptHeader);
+        if (receipt.reference) instr.txHash = receipt.reference;
+      } catch {
+        // Receipt format may differ across mppx versions / methods.
+        // Don't crash the request just because we couldn't parse the header.
+      }
     }
-
-    const phases = instr.phases;
-    const T0 = phases.T0 ?? 0;
-    const T1 = phases.T1 ?? T0;
-    const T2 = phases.T2 ?? T1;
-    const T3 = phases.T3 ?? T2;
-    const T4 = phases.T4 ?? T3;
-    const T5 = phases.T5 ?? T4;
-    const T6 = phases.T6 ?? T5;
 
     const record: RequestRecord = {
       ts: new Date().toISOString(),
@@ -206,15 +229,7 @@ export function timed(label: string, mode: 'confirmed' | 'fast' | 'free'): Middl
       label: instr.label,
       mode: instr.mode,
       status: c.res.status,
-      phases_ms: {
-        outer_overhead: Math.round(T1 - T0),
-        pre_upstream: Math.round(T2 - T1),
-        upstream_ttfb: Math.round(T3 - T2),
-        upstream_body: Math.round(T4 - T3),
-        handler_finish: Math.round(T5 - T4),
-        receipt_attach: Math.round(T6 - T5),
-        total: Math.round(T6 - T0),
-      },
+      phases_ms: computePhases(instr.phases),
       tx_hash: instr.txHash,
       upstream_url: instr.upstreamUrl,
       upstream_status: instr.upstreamStatus,

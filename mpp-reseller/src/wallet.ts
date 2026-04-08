@@ -36,21 +36,33 @@ interface LoadedWallet {
   address: Address;
 }
 
-function assertSafeWalletPath(absolute: string): void {
+/**
+ * Path safety guardrail. Throws if the resolved absolute path:
+ *   - does not contain `mpp-reseller` as a path segment
+ *   - does not contain `keys` as a path segment
+ *   - contains `.agentcash` anywhere (the user's main wallet directory)
+ *
+ * Used by both loadWallet() at runtime AND the create-wallet script,
+ * so the rules are enforced identically at write-time and read-time.
+ *
+ * Exported for testing — there's no other reason to call it from outside.
+ */
+export function assertSafeWalletPath(absolute: string, mode: 'read' | 'write' = 'read'): void {
+  const action = mode === 'write' ? 'WRITE' : 'READ';
   const segments = absolute.split(path.sep);
   if (!segments.includes('mpp-reseller')) {
     throw new Error(
-      `REFUSING TO READ: wallet path does not contain "mpp-reseller" segment: ${absolute}`
+      `REFUSING TO ${action}: wallet path does not contain "mpp-reseller" segment: ${absolute}`
     );
   }
   if (!segments.includes('keys')) {
     throw new Error(
-      `REFUSING TO READ: wallet path does not contain "keys" segment: ${absolute}`
+      `REFUSING TO ${action}: wallet path does not contain "keys" segment: ${absolute}`
     );
   }
   if (absolute.toLowerCase().includes('.agentcash')) {
     throw new Error(
-      `REFUSING TO READ: wallet path contains ".agentcash" — that directory is off-limits.\n` +
+      `REFUSING TO ${action}: wallet path contains ".agentcash" — that directory is off-limits.\n` +
       `  Resolved: ${absolute}`
     );
   }

@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { assertSafeWalletPath } from '../src/wallet.js';
 
 const TEMPO_USDC_E = '0x20C000000000000000000000b9537d11c60E8b50';
 const TEMPO_CHAIN_ID = 4217;
@@ -41,39 +42,6 @@ const __dirname = path.dirname(__filename);
 // to the source file location.
 const WALLET_PATH = path.resolve(__dirname, '..', 'keys', 'reseller-wallet.json');
 
-// ── Deny-list checks ────────────────────────────────────────────────────────
-
-function assertSafeWalletPath(absolute: string): void {
-  // The resolved absolute path MUST contain both `mpp-reseller` and `keys`
-  // as path segments. Use path.sep so this works on both Windows and *nix.
-  const segments = absolute.split(path.sep);
-  if (!segments.includes('mpp-reseller')) {
-    throw new Error(
-      `REFUSING TO WRITE: resolved wallet path does not contain "mpp-reseller" segment.\n` +
-      `  Resolved: ${absolute}\n` +
-      `  This is a safety guardrail to prevent overwriting wallets outside the reseller project.`
-    );
-  }
-  if (!segments.includes('keys')) {
-    throw new Error(
-      `REFUSING TO WRITE: resolved wallet path does not contain "keys" segment.\n` +
-      `  Resolved: ${absolute}`
-    );
-  }
-
-  // The resolved path MUST NOT contain `.agentcash` anywhere — that is the
-  // user's existing wallet directory and we never touch it.
-  const lower = absolute.toLowerCase();
-  if (lower.includes('.agentcash')) {
-    throw new Error(
-      `REFUSING TO WRITE: resolved wallet path contains ".agentcash" segment.\n` +
-      `  Resolved: ${absolute}\n` +
-      `  This script is not allowed to write anywhere near ~/.agentcash/.\n` +
-      `  If you see this error, something is very wrong — investigate before retrying.`
-    );
-  }
-}
-
 // ── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -83,7 +51,7 @@ async function main(): Promise<void> {
   console.log(`Target path: ${WALLET_PATH}`);
 
   // Step 1: safety check the resolved path
-  assertSafeWalletPath(WALLET_PATH);
+  assertSafeWalletPath(WALLET_PATH, 'write');
   console.log('✓ Path safety checks passed');
 
   // Step 2: refuse if already exists

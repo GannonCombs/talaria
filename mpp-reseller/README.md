@@ -1,6 +1,6 @@
 # mpp-reseller
 
-A local MPP reseller for three Google Maps endpoints. **Round 2** of the MPP latency investigation. See [docs/mpp-latency-round1-findings.md](../docs/mpp-latency-round1-findings.md) for the Round 1 conclusions that motivated this.
+A local MPP reseller for three Google Maps endpoints. **Round 2** of the MPP latency investigation. See [docs/mpp-latency-findings.md](../docs/mpp-latency-findings.md) for the Round 1 conclusions that motivated this and the Round 2 results.
 
 The reseller wraps Google Maps Platform behind the Machine Payments Protocol (MPP) so that any agent with a Tempo USDC.e wallet can call our endpoints with no API key, no signup, no anything — just pay-per-request. We control the proxy code, so we can deeply instrument what's happening on each call. The point of Round 2 is to prove we can land at the ~4.5s Locus/direct floor and escape the ~20s Tempo proxy class entirely.
 
