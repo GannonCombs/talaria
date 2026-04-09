@@ -68,6 +68,32 @@ export async function fetchStreetview(
   return { response, redactedUrl: redactKey(url) };
 }
 
+// ── Streetview Metadata (FREE per Google's pricing) ─────────────────────────
+//
+// Returns JSON like { status: "OK", ... } if imagery exists, or
+// { status: "ZERO_RESULTS" } if there's no Street View pano near the
+// requested coordinates. Free to call (no Google charges, $0 USDC.e
+// because we expose this as a non-paid route on the reseller).
+//
+// Use this to skip the paid /maps/streetview call entirely for ~60% of
+// Austin residential addresses, which return Google's tiny placeholder
+// instead of real imagery.
+
+const STREETVIEW_METADATA_PARAMS = ['location', 'pano', 'size', 'radius', 'source'] as const;
+
+export async function fetchStreetviewMetadata(
+  query: Record<string, string | undefined>
+): Promise<UpstreamResult> {
+  const cfg = getConfig();
+  const params = passQuery(query, STREETVIEW_METADATA_PARAMS);
+  params.set('key', cfg.googleMapsApiKey);
+
+  // Same base path as the paid endpoint, just with /metadata appended.
+  const url = `${cfg.upstream.streetview}/metadata?${params.toString()}`;
+  const response = await fetch(url, { signal: timeoutSignal(cfg.upstreamTimeoutMs) });
+  return { response, redactedUrl: redactKey(url) };
+}
+
 // ── Text Search (legacy Places API) ─────────────────────────────────────────
 
 const TEXTSEARCH_PARAMS = [

@@ -24,11 +24,11 @@ const PAID_ACTIONS: CostRow[] = [
   },
   {
     action: 'Listing photo (per house)',
-    service: 'Google Maps Street View (via Tempo)',
-    cost: '$0.007 per listing, then free forever',
+    service: 'Google Maps Street View (via local mpp-reseller)',
+    cost: '$0.001 per listing, then free forever',
     frequency: 'On demand, only when you open a listing detail you have not opened before',
     notes:
-      'Single Street View call at the listing\u2019s lat/lng. Cached on disk after the first fetch \u2014 re-opening the same listing costs nothing.',
+      'Single Street View call at the listing\u2019s lat/lng. Cached on disk after the first fetch \u2014 re-opening the same listing costs nothing. Routed through the local mpp-reseller for ~7\u00d7 cheaper and ~5\u00d7 faster than the previous Tempo proxy path.',
   },
 ];
 

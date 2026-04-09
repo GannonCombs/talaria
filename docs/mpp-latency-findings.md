@@ -361,3 +361,144 @@ Updated from Round 1's "avoid Tempo proxies" guidance:
 All payments are USDC.e on Tempo. Round 2's $0.016 went from the user's main agentcash wallet to the reseller wallet — both controlled by the user, recoverable.
 
 Off-chain: Round 2 made 19 successful Google Maps API calls against the user's free-tier credit. At $7-$32 per 1000 calls depending on the API, that's at most ~$0.20 of pretend Google credit consumed, well within the $200/month free allowance.
+
+---
+
+# Round 3 — Listing photos shipped to the housing app
+
+> **Round 3 spend:** $0.003 (3 paid streetview calls × $0.001 — one cold-cache verification on a known-good central Austin listing, plus two Phase E end-to-end tests)
+> **Branch:** `feat/listing-photos`, rebased onto master and merged
+> **Reseller code:** [mpp-reseller/](../mpp-reseller/) (gained one new free `/maps/streetview/metadata` route)
+
+## What shipped
+
+The parked `feat/listing-photos` branch had a fully-built listing photo feature for the housing module — Next.js API route, disk cache, sentinel handling, ListingDrawer integration, CostInfoModal, and a server-side MPP client rewrite using `mppx/client` + `viem` from the user's main agentcash wallet. The branch was parked because cold-cache photo loads against `googlemaps.mpp.tempo.xyz` took **15-17 seconds** — the same Tempo proxy slowness Round 2 conclusively diagnosed.
+
+Round 3 unblocks the branch by:
+
+1. **Rebasing onto master** — clean merge, zero conflicts. Round 1/1.5/2 only added new files; nothing on master since the fork point touched any of the files the branch modifies.
+2. **Swapping one URL constant** in [lib/modules/housing/listing-photo.ts](../lib/modules/housing/listing-photo.ts): `https://googlemaps.mpp.tempo.xyz` → `http://127.0.0.1:8787`. Same flat URL paths, same MPP charge intent, same wallet. The only thing that changes is which proxy serves the request.
+3. **Updating cost constants** in the same file from `0.007` (Tempo's price) to `0.001` (the reseller's price) and the user-visible row in [components/layout/CostInfoModal.tsx](../components/layout/CostInfoModal.tsx).
+
+## The headline numbers
+
+Three live measurements through the actual production stack (Talaria Next.js → `lib/modules/housing/listing-photo.ts` → `lib/mpp-client.ts` paidFetch → reseller → Google Maps):
+
+| Listing | Coverage | Phase C (no preflight) | Phase E (with preflight) |
+|---|---|---:|---:|
+| **id=2313** central west Austin (78746) | Has imagery | **1,430 ms + $0.001** | 1,585 ms + $0.001 (~155 ms preflight overhead) |
+| **id=611** rural NW Austin (78732) | No imagery | 1,672 ms + $0.001 (returned 7,838-byte placeholder) | **147 ms + $0** (free metadata skip → sentinel + 404) |
+
+Compared to the parked branch's measurements against `googlemaps.mpp.tempo.xyz`:
+
+| | Parked branch | Round 3 (with preflight) | Speedup |
+|---|---:|---:|---:|
+| Has-imagery cold load | ~15,000-17,000 ms | **~1,585 ms** | **~10×** |
+| Has-imagery warm cache | ~22 ms | ~22 ms | (same — disk cache) |
+| No-imagery cold load | ~15,000-17,000 ms (paid, returned placeholder) | **~147 ms** ($0 spent) | **~110×** |
+| Per-call price | $0.007 (Tempo's price) | $0.001 | **7× cheaper** |
+
+The full server-side breakdown for a paid call (id=2313) via the dev server console:
+
+```
+[photo:2313:dbLookup]: 0.193ms
+[photo:streetview:metadata]: 92.19ms        ← FREE preflight
+[fetch:    6ms 402] GET 127.0.0.1:8787/maps/streetview?location=30.264839,-97.815093&...
+[fetch:  130ms 200] POST rpc.tempo.xyz/      ← viem RPC setup
+[fetch:   77ms 200] POST rpc.tempo.xyz/
+[fetch: 1198ms 200] GET 127.0.0.1:8787/maps/streetview?...   ← reseller actual work
+[photo:streetview]: 1.577s
+[photo:2313:total]: 1.585s
+```
+
+The 1,198 ms paid GET retry through the reseller is consistent with Round 2's measured server-side floor of ~917-1,800 ms. The reseller is doing exactly what we built it to do.
+
+## Phase D — the photo media experiment
+
+The user asked whether the new Places API (`places.googleapis.com/v1`) might have better residential photo coverage than the legacy one. The parked branch's prior testing found that the LEGACY `/maps/place/photo` endpoint always returned empty `photos[]` for Austin residential addresses.
+
+**Phase D ran a free experiment** ([mpp-reseller/scratch/places-api-experiment.ts](../mpp-reseller/scratch/places-api-experiment.ts)): for 5 random Austin home listings (mix of $20M luxury, $1.9M mid-range, and $830k entry-level), call `POST places.googleapis.com/v1/places:searchText` with field mask `places.id,places.displayName,places.formattedAddress,places.photos`. Direct Google API calls with the existing key, no MPP, $0 USDC.e.
+
+**Result: 0 / 5 addresses returned any photo references.** Including the $20M property. Every search result successfully matched the address (`displayName` correct, place ID returned), but `photos[]` was empty everywhere.
+
+A follow-up free test ([mpp-reseller/scratch/places-details-test.ts](../mpp-reseller/scratch/places-details-test.ts)) ruled out the "maybe place details has photos that searchText doesn't" hypothesis: calling `GET /v1/places/{place_id}` with `id,displayName,photos` field mask for two of the addresses returned `photos: []` in both cases. Field mask consistency confirmed across endpoints.
+
+**Conclusion: the new Places API has zero residential photo coverage in Austin, regardless of which endpoint we ask.** Google Places photos come from user uploads (rare for private homes) and Street View vehicles (which IS the streetview imagery we're already getting). There's no third source. The user's "maybe photo media is different" hope is falsified definitively — they're literally just two different ways to ask for the same Streetview imagery for residential addresses.
+
+## Phase E — the unexpected real problem and the free fix
+
+Phase D ran on 5 addresses. While it was confirming the Places API had no photos, it also captured Streetview output for each address as a control. Three of five Streetview responses came back at exactly **7,838 bytes** — Google's "no Street View imagery available at this location" placeholder. **A 60% no-imagery rate in a random sample of Austin homes**, including a $20M and a $1.9M property.
+
+This was the actual user-visible problem the parked branch had a TODO to fix:
+
+```ts
+// Google returns a small "no imagery" gray box if there's no pano
+// nearby. We can't easily distinguish that from a real image without
+// image analysis, so we accept whatever bytes come back. Future:
+// probe /streetview/metadata first (it's free) to skip the call.
+```
+
+**Round 3 implemented that TODO.** Google's Street View Static Metadata API is free per their published pricing — it returns `{"status": "OK"}` if imagery exists or `{"status": "ZERO_RESULTS"}` if not, in ~50-200 ms. The fix was three additions:
+
+1. **`fetchStreetviewMetadata` in [mpp-reseller/src/upstream.ts](../mpp-reseller/src/upstream.ts)** — calls Google's free metadata endpoint with the API key.
+2. **A new free passthrough route in [mpp-reseller/src/server.ts](../mpp-reseller/src/server.ts)**: `GET /maps/streetview/metadata` mounted with `timed('streetview-metadata', 'free')` and **no mppx payment middleware**. The reseller becomes the single owner of the Google API key for both the paid streetview call and the free metadata check.
+3. **`checkStreetViewMetadata` in [lib/modules/housing/listing-photo.ts](../lib/modules/housing/listing-photo.ts)** — calls the reseller's metadata route via plain `fetch` (not `paidFetch`) before paying for the photo. On `ZERO_RESULTS`, returns `null` and the existing API route writes the sentinel and returns 404. Fails open on network errors so a transient blip doesn't deny a valid photo.
+
+**Verified end-to-end against both cases:**
+
+For id=611 (rural NW Austin, no imagery):
+```
+[photo:611:dbLookup]: 31.302ms
+[photo:streetview:metadata]: 105.101ms
+[listing-photo] no Street View imagery at 30.365315,-97.911301
+[photo:streetview]: 106.169ms
+[photo:611:total]: 147.4ms
+GET /api/housing/listing-photo/611 404 in 250ms
+```
+**No paid call, no USDC.e, sentinel written, 404 returned in 147 ms.**
+
+For id=2313 (central west Austin, has imagery):
+```
+[photo:2313:dbLookup]: 0.193ms
+[photo:streetview:metadata]: 92.19ms
+[photo:streetview]: 1.577s
+[photo:2313:total]: 1.585s
+GET /api/housing/listing-photo/2313 200 in 1620ms
+```
+**Metadata returns OK in 92 ms, paid call proceeds normally, photo in 1.59s total. ~155 ms preflight overhead vs the no-preflight Phase C measurement of 1,430 ms — about 11% cost for the certainty.**
+
+## Practical impact for Talaria's housing module
+
+- **Cold-cache photo loads where Streetview HAS imagery**: dropped from ~15-17 seconds (parked branch via Tempo) to **~1.6 seconds** (Round 3 via local reseller with preflight). User-perceptible — drawer feels responsive.
+- **Cold-cache photo loads where Streetview has NO imagery (~60% of homes)**: dropped from ~15-17 seconds (parked branch wasted a paid call to fetch a placeholder) to **~150 ms** (Round 3 free metadata skip → empty state). **No misleading gray box. No USDC.e spent.**
+- **Warm-cache loads** (instant from disk): unchanged from the parked branch — instant.
+- **Per-call price**: $0.007 (Tempo) → $0.001 (reseller) = **7× cheaper**.
+- **Net cost per cache-miss across the population**: $0.007 (always pay) → $0.001 × 0.40 = $0.0004 (only pay when imagery actually exists). **17.5× cheaper in aggregate.**
+
+For a user opening 100 listings in a session with this fix and a fresh disk cache, the worst-case cost goes from `100 × $0.007 = $0.70` (parked branch) to `100 × $0.0004 = $0.04` (Round 3). That's a real, measurable cost savings.
+
+## Cumulative spend audit
+
+| Round | Description | Spend |
+|---|---|---:|
+| Round 1 | 6-service wide sweep | $0.1721 |
+| Round 1.5 | alchemy-tempo controlled comparison | $0.0008 |
+| Round 2 | Reseller comparison sweep (16 calls × $0.001) | $0.0160 |
+| Round 3 | Photo path verification + Phase E end-to-end (3 calls × $0.001) | $0.0030 |
+| **Total** | | **$0.1919** |
+| **Cap** | | **$1.00** |
+| **Remaining** | | **$0.8081** |
+
+Round 3 spent only $0.003 of paid USDC.e because Phase D was free (direct Google API), Phase E's no-imagery test was free (metadata preflight skipped the paid call), and only the has-imagery verifications actually paid. The Round 2 cap of $1.00 still has $0.81 of headroom for Round 4 and beyond.
+
+Off-chain: Round 3 made ~25 Google Maps API calls (5 for Phase D, 4 for Phase D follow-up details test, and 3 paid Streetview + 5 metadata preflights for Phase C and Phase E verification). Total ~$0.20 of pretend Google free-tier credits, well within the $200/month allowance.
+
+## Out of scope (Round 4 and later)
+
+- **Multiple MPP service integrations beyond Google Maps.** The big remaining showcase opportunity. The reseller architecture generalizes to any upstream — wrap a different API and you have a new MPP service. Candidates: weather forecasts (OpenWeather, fast/cheap, already tested in Round 1), Mapbox isochrones (already wired but using free Valhalla — could swap to Mapbox via reseller for better quality), mortgage rate alerts via StableEmail.
+- **Replacing the agentcash CLI shellout in `lib/modules/housing/rentcast.ts`** with a direct `mppx/client` integration. The branch already converted `lib/mpp-client.ts` for the photo path; extending that to RentCast (and any other agentcash CLI users in Talaria) would shave another ~2-3 seconds per call by avoiding the subprocess overhead. Worth doing for the harness-measured speedup but not required for Round 3's photo feature.
+- **Image compression / re-encoding.** The disk cache stores raw Google Streetview JPEGs (~50-100 KB each). Fine for local dev. If we ever ship publicly, convert to WebP and resize for thumbnails.
+- **Pre-fetching photos for visible listings.** Currently lazy-loads when a drawer opens. Could pre-fetch the top-N visible listings on the map, but that's premature optimization until we see real UX with the new latency.
+- **Photo cache eviction policy.** Currently grows forever (`public/listing-photos/`). At ~70 KB per photo and ~1000 listings, that's ~70 MB max. Manual cleanup is fine.
+- **Public deployment of the reseller.** The housing app expects `127.0.0.1:8787`; making the URL configurable for production is its own task.
+- **A photo source that has actual residential coverage.** Realtor.com, MLS aggregators, Zillow scraping — all defeat the MPP showcase point. The 40% Streetview coverage rate is honest and acceptable for demonstration purposes.

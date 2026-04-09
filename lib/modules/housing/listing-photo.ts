@@ -16,12 +16,22 @@
 import { paidFetch } from '@/lib/mpp-client';
 import { logMppTransaction } from '@/lib/mpp';
 
-const GOOGLE_MAPS_BASE = 'https://googlemaps.mpp.tempo.xyz';
+// Round 3: swapped from googlemaps.mpp.tempo.xyz (the Tempo-operated proxy
+// that had a 15-17s structural latency floor — see docs/mpp-latency-findings.md)
+// to our locally-hosted reseller at mpp-reseller/. The reseller exposes the
+// same /maps/streetview path with the same query-parameter shape and the
+// same MPP charge intent on Tempo USDC.e. End-to-end cold load drops from
+// ~17s to ~2-4s and per-call price drops from $0.007 to $0.001.
+//
+// The reseller MUST be running on 127.0.0.1:8787 for this to work — see
+// mpp-reseller/README.md for the start command.
+const GOOGLE_MAPS_BASE = 'http://127.0.0.1:8787';
 
-// Pricing constants (verified via agentcash discover earlier this session).
-const TEXT_SEARCH_COST = 0.032;
-const PLACE_PHOTO_COST = 0.007;
-const STREETVIEW_COST = 0.007;
+// Pricing constants. These mirror the reseller's per-endpoint prices in
+// mpp-reseller/src/config.ts. If the reseller's prices change, update here.
+const TEXT_SEARCH_COST = 0.001;
+const PLACE_PHOTO_COST = 0.001;
+const STREETVIEW_COST = 0.001;
 
 export interface PhotoResult {
   bytes: Buffer;
@@ -83,10 +93,49 @@ async function fetchPlacePhoto(photoReference: string): Promise<PhotoResult> {
   };
 }
 
+// Free preflight: ask the reseller (which proxies Google's free metadata
+// endpoint) whether Street View imagery exists at the given coordinates.
+// Returns true if Google says imagery is available, false otherwise.
+//
+// Round 3 Phase D found that ~60% of randomly-picked Austin residential
+// addresses have no Street View coverage and return Google's tiny
+// 7,838-byte placeholder from the paid endpoint. The metadata endpoint
+// is free per Google's pricing, runs in ~50-200ms, and lets us skip
+// the paid call entirely for those 60% of addresses — saving USDC.e and
+// avoiding the bad-UX placeholder.
+async function checkStreetViewMetadata(lat: number, lng: number): Promise<boolean> {
+  const url = `${GOOGLE_MAPS_BASE}/maps/streetview/metadata?location=${lat},${lng}&radius=50&source=outdoor`;
+  try {
+    const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+    if (!res.ok) {
+      // Reseller down or returned an error — fail open and try the paid call
+      // anyway. We'd rather pay and get a placeholder than skip on a transient
+      // network blip.
+      console.warn(`[listing-photo] metadata preflight returned ${res.status}, failing open`);
+      return true;
+    }
+    const data = (await res.json()) as { status?: string };
+    return data.status === 'OK';
+  } catch (err) {
+    console.warn('[listing-photo] metadata preflight threw, failing open:', (err as Error).message);
+    return true;
+  }
+}
+
 async function fetchStreetView(
   lat: number,
   lng: number
 ): Promise<PhotoResult | null> {
+  // Free preflight first — ~50-200ms, no MPP, no USDC.e. Skips ~60% of
+  // Austin residential addresses that have no Street View coverage.
+  console.time('[photo:streetview:metadata]');
+  const hasImagery = await checkStreetViewMetadata(lat, lng);
+  console.timeEnd('[photo:streetview:metadata]');
+  if (!hasImagery) {
+    console.log(`[listing-photo] no Street View imagery at ${lat},${lng}`);
+    return null;
+  }
+
   const url = `${GOOGLE_MAPS_BASE}/maps/streetview?location=${lat},${lng}&size=800x500&radius=50&source=outdoor`;
   const res = await paidFetch(url, { method: 'GET' });
   logMppTransaction({
@@ -102,10 +151,6 @@ async function fetchStreetView(
     return null;
   }
 
-  // Google returns a small "no imagery" gray box if there's no pano
-  // nearby. We can't easily distinguish that from a real image without
-  // image analysis, so we accept whatever bytes come back. Future:
-  // probe /streetview/metadata first (it's free) to skip the call.
   const buffer = Buffer.from(await res.arrayBuffer());
   return {
     bytes: buffer,

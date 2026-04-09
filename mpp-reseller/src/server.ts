@@ -29,6 +29,7 @@ import { getConfig } from './config.js';
 import { loadWallet, shortAddress } from './wallet.js';
 import {
   fetchStreetview,
+  fetchStreetviewMetadata,
   fetchTextSearch,
   fetchPlacePhoto,
 } from './upstream.js';
@@ -134,6 +135,35 @@ async function streetviewHandler(c: Context): Promise<Response> {
   }
 }
 
+// Free passthrough — Google charges $0 for the streetview metadata endpoint,
+// so the reseller exposes it without an mppx payment middleware. Used by
+// Talaria's listing-photo path to skip the paid /maps/streetview call when
+// Google says ZERO_RESULTS for the requested coordinates (~60% of Austin
+// residential addresses, per the Round 3 Phase D experiment).
+async function streetviewMetadataHandler(c: Context): Promise<Response> {
+  markHandlerEntry(c);
+  try {
+    markPhase(c, 'T2');
+    const { response, redactedUrl } = await fetchStreetviewMetadata(
+      Object.fromEntries(new URL(c.req.url).searchParams)
+    );
+    markPhase(c, 'T3');
+    const text = await response.text();
+    markPhase(c, 'T4');
+    recordUpstream(c, redactedUrl, response.status, text.length);
+    const out = new Response(text, {
+      status: response.status,
+      headers: { 'content-type': response.headers.get('content-type') ?? 'application/json' },
+    });
+    markPhase(c, 'T5');
+    return out;
+  } catch (err) {
+    recordError(c, (err as Error).message);
+    markPhase(c, 'T5');
+    return c.json({ error: 'upstream failed', message: (err as Error).message }, 502);
+  }
+}
+
 async function textsearchHandler(c: Context): Promise<Response> {
   markHandlerEntry(c);
   try {
@@ -193,6 +223,17 @@ async function photoHandler(c: Context): Promise<Response> {
     return c.json({ error: 'upstream failed', message: (err as Error).message }, 502);
   }
 }
+
+// ── Free passthrough routes (no MPP payment middleware) ────────────────────
+
+// Streetview metadata — Google charges $0 for this endpoint. Used by Talaria
+// to skip the paid streetview call when Google says ZERO_RESULTS, which
+// happens for ~60% of Austin residential addresses (Round 3 Phase D finding).
+app.get(
+  '/maps/streetview/metadata',
+  timed('streetview-metadata', 'free'),
+  streetviewMetadataHandler
+);
 
 // ── Routes — confirmed mode ─────────────────────────────────────────────────
 

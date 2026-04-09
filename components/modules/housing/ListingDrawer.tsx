@@ -107,6 +107,16 @@ export default function ListingDrawer({
       .catch(() => {});
   }, [listing.id]);
 
+  // Listing photo lifecycle. Reset to 'loading' whenever the user navigates
+  // to a different listing so each new drawer render starts fresh — the
+  // previous version mutated the img element's display style imperatively
+  // in onError, which leaked across listings (one 404 hid the img for
+  // every subsequent listing in the same drawer instance).
+  const [photoState, setPhotoState] = useState<'loading' | 'loaded' | 'no-imagery'>('loading');
+  useEffect(() => {
+    setPhotoState('loading');
+  }, [listing.id]);
+
   async function toggleTrack() {
     if (tracked) {
       await fetch('/api/housing/track', {
@@ -147,30 +157,48 @@ export default function ListingDrawer({
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
         {/* Listing photo. Lazy-fetched on demand from /api/housing/listing-photo/<id>.
-            Costs ~$0.039 the first time we open this listing's drawer (Google
-            Maps text-search + place photo OR Street View fallback) and is
-            cached on disk forever after. The img tag triggers the fetch
-            via the browser's normal resource loader; the server route
-            handles the MPP plumbing. The dark background prevents layout
-            shift while the image loads or in the no-imagery case. */}
-        <div className="relative w-full aspect-[8/5] bg-surface-container-low border border-outline overflow-hidden">
-          {/* Plain <img> is intentional. next/image would try to optimize
-              this URL at build time, but it's dynamic by definition —
-              the route fetches the bytes from MPP on demand and caches
-              them on disk. The browser already caches the served bytes
-              forever via the route's Cache-Control header. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`/api/housing/listing-photo/${listing.id}`}
-            alt={listing.address}
-            className="w-full h-full object-cover"
-            loading="lazy"
-            onError={(e) => {
-              // Hide on 404 (no imagery available); the surrounding box
-              // stays as a quiet placeholder.
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-            }}
-          />
+            Costs $0.001 (was $0.007 against Tempo's proxy) the first time we
+            open a listing whose photo isn't on disk; cached forever after.
+            For ~60% of Austin residential addresses Google has no Street View
+            coverage at all — the API route's metadata preflight skips the paid
+            call entirely for those, returns 404, and the drawer renders the
+            "no street view available" empty state below.
+
+            Photo state lifecycle is React-managed (not imperative DOM
+            mutation) so navigating between listings resets cleanly. */}
+        <div className="relative w-full aspect-[8/5] bg-surface-container-low border border-outline overflow-hidden flex items-center justify-center">
+          {photoState === 'loading' && (
+            <span className="text-xs text-text-muted tracking-wide">
+              Loading photo…
+            </span>
+          )}
+          {photoState === 'no-imagery' && (
+            <span className="text-xs text-text-muted tracking-wide">
+              No street view available for this address
+            </span>
+          )}
+          {/* The img is conditionally rendered (not just hidden). Mounting
+              a fresh element on each listing change avoids any leftover
+              DOM state from a previous render. Plain <img> is intentional —
+              next/image would try to optimize a URL that's dynamic by
+              definition (the route fetches bytes from MPP on demand).
+
+              Absolute positioning takes the img out of the parent's flex
+              flow so the loading/no-imagery span (the actual flex child)
+              stays centered. Without this, the img's `w-full` claims the
+              full flex width and pushes the span to the left edge. */}
+          {photoState !== 'no-imagery' && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={listing.id}
+              src={`/api/housing/listing-photo/${listing.id}`}
+              alt={listing.address}
+              className={`absolute inset-0 w-full h-full object-cover ${photoState === 'loaded' ? '' : 'invisible'}`}
+              loading="lazy"
+              onLoad={() => setPhotoState('loaded')}
+              onError={() => setPhotoState('no-imagery')}
+            />
+          )}
         </div>
 
         {/* Address + details */}

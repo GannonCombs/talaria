@@ -1,6 +1,17 @@
 # MPP Reseller Experiment — Future Work
 
-> Status: not started. Authored 2026-04-08 as a follow-up to the listing-photo
+> **STATUS: COMPLETED in Round 2 + Round 3.** This document is the original
+> design proposal that motivated the reseller build. The actual experiment
+> ran (Round 2 built the reseller, measured it across 16 sweep calls, and
+> proved that Tempo's googlemaps proxy adds ~17 seconds of overhead the
+> protocol doesn't require). See [docs/mpp-latency-findings.md](mpp-latency-findings.md)
+> for the full results, including the Round 3 follow-up that wired the
+> reseller into the housing module's listing photos and added a free
+> Streetview metadata preflight to skip the 60% of Austin homes with no
+> coverage. The proposal below is preserved as historical context for
+> how this work got started.
+>
+> Authored 2026-04-08 as a follow-up to the listing-photo
 > latency investigation. See also: feature branch `feat/listing-photos`.
 
 ## Why this matters
