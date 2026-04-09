@@ -493,7 +493,51 @@ Round 3 spent only $0.003 of paid USDC.e because Phase D was free (direct Google
 
 Off-chain: Round 3 made ~25 Google Maps API calls (5 for Phase D, 4 for Phase D follow-up details test, and 3 paid Streetview + 5 metadata preflights for Phase C and Phase E verification). Total ~$0.20 of pretend Google free-tier credits, well within the $200/month allowance.
 
-## Out of scope (Round 4 and later)
+## Round 4 — Free zip-code price-trend heat map (Zillow ZHVI)
+
+> **Spend:** $0 of paid USDC.e. Cumulative still $0.1919.
+
+Round 4 added a zip-level price-trend heat map to the housing module. The map's old "Neighborhoods" tract checkbox (decorative outlines, no data) was replaced with a new "Price Trends" layer that colors ~87 Austin metro zip codes by their Zillow Home Value Index (ZHVI) percent change over a user-configurable period (1–60 months, with 1mo / 6mo / 1yr / 2yr / 5yr presets).
+
+This is the **first Talaria feature that derives showcase value from cheap MPP-paid data + free public data combined**. The 4,878 cached RentCast listings (Round 1's $0.99 of paid data) continue to render as pins on top of the new heat map. The story: $0.99 of MPP-paid listings + $0 of public-data heat map = an interactive Austin price-trend explorer where the free derivation amplifies the value of the cheap MPP spend.
+
+**Data sources, all free:**
+- **Zillow ZHVI** — `https://files.zillowstatic.com/research/public_csvs/zhvi/Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv` (middle tier, smoothed, seasonally adjusted, all home types). Public CSV, no auth, no rate limit. Fetched once via `node scripts/fetch-zhvi.mjs`, filtered to Austin metro, cached as `public/austin-zhvi.json` (~245 KB, 87 zips × 60 months).
+- **Census ZCTA polygons** — `OpenDataDE/State-zip-code-GeoJSON` (Texas zip codes), filtered to the same 87 Austin zips and cached as `public/austin-zips.geojson` (~2.4 MB).
+
+**Architecture:**
+- `scripts/fetch-zhvi.mjs` mirrors the existing `scripts/fetch-pmms.mjs` "fetch a free CSV, parse it, write a JSON artifact, export the parser for tests, fail clearly on URL drift" pattern. Exports `parseZhviCsv()` and `filterGeoJsonByZips()` for unit tests; `tests/parse-zhvi.test.ts` covers 13 cases (Austin/county filter fallback, quoted Metro field with embedded comma, blank-value handling, CRLF, alternate ZCTA property names, malformed input).
+- `scripts/fetch-zhvi.d.mts` provides TypeScript declarations for the .mjs script (must be `.d.mts`, not `.d.ts`, for ESM resolution).
+- The map renders the heat map client-side via Leaflet GeoJSON. `colorForPct(pct)` is a 3-stop divergent palette (deep red `#e5534b` at -10%, neutral gray `#30363d` at 0%, deep green `#3fb950` at +10%) with linear interpolation between stops. `zipStyleFor(zhvi, monthsBack)` is a higher-order function returning a Leaflet style function; the GeoJSON layer uses `key={zhvi-${priceTrendMonths}}` to force a clean remount when the period changes (Leaflet caches style functions otherwise).
+- **State location:** `showPriceTrends` and `priceTrendMonths` are lifted to `app/housing/page.tsx` (the lowest common ancestor of `LeftPanel` and `HousingMap`) so the LeftPanel section sets the period and the map reads it from the same source.
+- **Two UI affordances, two concerns:** the visibility checkbox lives in the map controls panel (top-right, replaces the dead "Neighborhoods" checkbox in place); the period selector lives in a new "Price Trends" full-panel takeover section in the LeftPanel under Budget & Loan, mirroring the existing Isochrones / Scoring / Budget & Loan section pattern. The takeover view has a 1–60 month range slider, 5 quick presets, a divergent-palette legend, and a Zillow ZHVI attribution.
+
+**Real data story discovered (last data month: 2026-02-28):**
+- 78704 (South Congress / Bouldin): -5.2% over 12 months
+- 78745 (South Austin): -6.4% over 12 months
+- 78702 (East Austin): -5.8% over 12 months
+- 78731 (Northwest Hills): -1.4%
+- 78746 (Westlake): +1.1% (the only metro zip holding value)
+- Over 5 years: Westlake +33.8% vs east Austin -2.4% — the post-2022-peak Austin correction is plainly visible.
+
+The user's original concern ("averages get skewed by outliers — one mansion in a trailer park") is naturally avoided by ZHVI's middle-tier construction (33rd–67th percentile), which is designed to track "the typical mid-range home" rather than the mean.
+
+**Phase summary:**
+- **Phase A** — `scripts/fetch-zhvi.mjs` + `.d.mts` shim + `parse-zhvi.test.ts` (13 tests) + `austin-zhvi.json` + `austin-zips.geojson` generated.
+- **Phase B** — `showPriceTrends` and `priceTrendMonths` lifted to `app/housing/page.tsx`.
+- **Phase C** — `HousingMap.tsx` heat map layer with `colorForPct` / `zipStyleFor` / `formatPeriod` / `formatPct` helpers, `onEachFeature` hover tooltip showing zip + latest ZHVI value + period % change, "Price Trends" checkbox in `MapControls`.
+- **Phase D** — `LeftPanel.tsx` new "Price Trends" section button (`TrendingUp` icon) + full-panel takeover view (slider + 5 presets + color legend + ZHVI attribution).
+- **Phase E** — Tract code already removed in Phase C; only one stale comment in `HousingMap.tsx` updated.
+- **Phase F** — All 104 tests pass (13 new ZHVI parser tests + 91 prior). `npx tsc --noEmit -p tsconfig.json` clean.
+- **Phase G** — `CostInfoModal.tsx` FREE_ACTIONS row added; this doc updated.
+
+| Round | Description | Spend |
+|---|---|---:|
+| Round 4 | Zip-code price-trend heat map (free Zillow ZHVI + Census ZCTA) | $0.0000 |
+
+Cumulative across all rounds remains **$0.1919 / $1.00 cap**. Round 4 closes with no change.
+
+## Out of scope (Round 5 and later)
 
 - **Multiple MPP service integrations beyond Google Maps.** The big remaining showcase opportunity. The reseller architecture generalizes to any upstream — wrap a different API and you have a new MPP service. Candidates: weather forecasts (OpenWeather, fast/cheap, already tested in Round 1), Mapbox isochrones (already wired but using free Valhalla — could swap to Mapbox via reseller for better quality), mortgage rate alerts via StableEmail.
 - **Replacing the agentcash CLI shellout in `lib/modules/housing/rentcast.ts`** with a direct `mppx/client` integration. The branch already converted `lib/mpp-client.ts` for the photo path; extending that to RentCast (and any other agentcash CLI users in Talaria) would shave another ~2-3 seconds per call by avoiding the subprocess overhead. Worth doing for the harness-measured speedup but not required for Round 3's photo feature.

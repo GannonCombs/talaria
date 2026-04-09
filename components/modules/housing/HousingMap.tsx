@@ -55,6 +55,24 @@ interface HousingMapProps {
   isoPolygons?: IsoPolygon[];
   isoIntersection?: [number, number][][];
   onListingClick?: (id: number) => void;
+  // Round 4: zip-code price trend heat map. Visibility toggle is owned by
+  // the parent (housing page) so the LeftPanel section can read the same
+  // state. The period itself is set in LeftPanel — HousingMap only reads it.
+  showPriceTrends: boolean;
+  onShowPriceTrendsChange: (v: boolean) => void;
+  priceTrendMonths: number;
+}
+
+// Round 4: Zillow ZHVI artifact shape (matches scripts/fetch-zhvi.mjs output)
+interface ZhviSeries {
+  date: string;
+  value: number;
+}
+interface ZhviData {
+  fetchedAt: string;
+  lastDataMonth: string;
+  metro: string;
+  zips: Record<string, ZhviSeries[]>;
 }
 
 // Pin color. Two options kept around so we can toggle without re-picking:
@@ -79,15 +97,15 @@ function getPinRadius(dealScore: number | null): number {
 
 // Map controls
 function MapControls({
-  showNeighborhoods,
-  setShowNeighborhoods,
+  showPriceTrends,
+  setShowPriceTrends,
   showIsochrones,
   setShowIsochrones,
   showFloodZones,
   setShowFloodZones,
 }: {
-  showNeighborhoods: boolean;
-  setShowNeighborhoods: (v: boolean) => void;
+  showPriceTrends: boolean;
+  setShowPriceTrends: (v: boolean) => void;
   showIsochrones: boolean;
   setShowIsochrones: (v: boolean) => void;
   showFloodZones: boolean;
@@ -98,11 +116,11 @@ function MapControls({
       <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
         <input
           type="checkbox"
-          checked={showNeighborhoods}
-          onChange={(e) => setShowNeighborhoods(e.target.checked)}
+          checked={showPriceTrends}
+          onChange={(e) => setShowPriceTrends(e.target.checked)}
           className="accent-primary"
         />
-        Neighborhoods
+        Price Trends
       </label>
       <label className="flex items-center gap-2 text-xs text-on-surface-variant cursor-pointer">
         <input
@@ -182,15 +200,94 @@ function ListingClickHandler({
   return null;
 }
 
-// Style each Census tract — for now, a uniform teal tint.
-// Round 3 will color by price trend (green/red).
-function tractStyle(): Record<string, unknown> {
-  return {
-    color: '#30363d',
-    weight: 0.5,
-    fillColor: 'transparent',
-    fillOpacity: 0,
+// ── Round 4: Zip-code price trend heat map helpers ─────────────────────────
+
+// Divergent palette keyed to Talaria's accent tokens.
+//   <= -10%   → deep red (#e5534b)
+//   <    0%   → light red (linear interpolation toward neutral)
+//   ≈    0%   → neutral gray (#30363d)
+//   >    0%   → light green (linear interpolation toward deep green)
+//   >= +10%   → deep green (#3fb950)
+function colorForPct(pct: number): string {
+  const clamped = Math.max(-0.10, Math.min(0.10, pct));
+  const t = (clamped + 0.10) / 0.20; // 0..1, with 0.5 = neutral
+  // Three stops: red (#e5534b) → gray (#30363d) → green (#3fb950)
+  const stops = [
+    { t: 0, r: 0xe5, g: 0x53, b: 0x4b },
+    { t: 0.5, r: 0x30, g: 0x36, b: 0x3d },
+    { t: 1, r: 0x3f, g: 0xb9, b: 0x50 },
+  ];
+  let lo = stops[0];
+  let hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i].t && t <= stops[i + 1].t) {
+      lo = stops[i];
+      hi = stops[i + 1];
+      break;
+    }
+  }
+  const localT = (t - lo.t) / (hi.t - lo.t || 1);
+  const r = Math.round(lo.r + (hi.r - lo.r) * localT);
+  const g = Math.round(lo.g + (hi.g - lo.g) * localT);
+  const b = Math.round(lo.b + (hi.b - lo.b) * localT);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Build a Leaflet style function for the zip GeoJSON layer. Closes over the
+// loaded ZHVI data and the active period (in months). Each feature looks up
+// its zip in the ZHVI map, computes the % change over the period, and gets
+// a fill color from the divergent palette.
+function zipStyleFor(zhvi: ZhviData | null, monthsBack: number) {
+  return (feature?: { properties?: { zip?: string } }): Record<string, unknown> => {
+    if (!zhvi || !feature?.properties?.zip) {
+      return { color: '#30363d', weight: 0.6, fillColor: '#1c2128', fillOpacity: 0.1 };
+    }
+    const series = zhvi.zips[feature.properties.zip];
+    if (!series || series.length < monthsBack + 1) {
+      // Not enough history for this zip — render as a quiet outline so
+      // the geographic context is still there but the color isn't misleading.
+      return { color: '#30363d', weight: 0.6, fillColor: '#1c2128', fillOpacity: 0.1 };
+    }
+    const latest = series[series.length - 1].value;
+    const past = series[series.length - 1 - monthsBack].value;
+    const pct = (latest - past) / past;
+    // 0.4 fillOpacity reads as a tint over the basemap rather than a
+    // paint job, so the listing pins remain clearly visible on top.
+    return {
+      color: '#3a4350',
+      weight: 0.7,
+      fillColor: colorForPct(pct),
+      fillOpacity: 0.4,
+    };
   };
+}
+
+// Look up the % change for a single zip + period. Returns null if no data.
+function pctChangeFor(zhvi: ZhviData | null, zip: string, monthsBack: number): number | null {
+  if (!zhvi) return null;
+  const series = zhvi.zips[zip];
+  if (!series || series.length < monthsBack + 1) return null;
+  const latest = series[series.length - 1].value;
+  const past = series[series.length - 1 - monthsBack].value;
+  return (latest - past) / past;
+}
+
+// Format a number of months as a human-readable label ("1 month",
+// "12 months", "1 year", "5 years"). Used in tooltips and the LeftPanel.
+export function formatPeriod(months: number): string {
+  if (months === 1) return '1 month';
+  if (months < 12) return `${months} months`;
+  if (months === 12) return '1 year';
+  if (months % 12 === 0) return `${months / 12} years`;
+  return `${months} months`;
+}
+
+// Format a percentage with sign for tooltips: "+5.2%" / "−5.2%" / "0.0%"
+function formatPct(pct: number): string {
+  const v = (pct * 100).toFixed(1);
+  if (pct > 0) return `+${v}%`;
+  if (pct < 0) return `${v}%`; // already has the minus
+  return `${v}%`;
 }
 
 export default function HousingMap({
@@ -199,17 +296,28 @@ export default function HousingMap({
   isoPolygons = [],
   isoIntersection,
   onListingClick,
+  showPriceTrends,
+  onShowPriceTrendsChange,
+  priceTrendMonths,
 }: HousingMapProps) {
-  const [showNeighborhoods, setShowNeighborhoods] = useState(true);
   const [showIsochrones, setShowIsochrones] = useState(false);
   const [showFloodZones, setShowFloodZones] = useState(false);
-  const [tractData, setTractData] = useState<FeatureCollection | null>(null);
+  const [zipGeoData, setZipGeoData] = useState<FeatureCollection | null>(null);
+  const [zhviData, setZhviData] = useState<ZhviData | null>(null);
   const [floodData, setFloodData] = useState<FeatureCollection | null>(null);
 
+  // Round 4: load the zip polygons + ZHVI artifact in parallel. Both are
+  // generated by `node scripts/fetch-zhvi.mjs` and committed to public/.
+  // Failures are silent — if either fails, the heat map just doesn't render
+  // (the rest of the map still works).
   useEffect(() => {
-    fetch('/travis-tracts.geojson')
+    fetch('/austin-zips.geojson')
       .then((r) => r.json())
-      .then(setTractData)
+      .then(setZipGeoData)
+      .catch(() => {});
+    fetch('/austin-zhvi.json')
+      .then((r) => r.json())
+      .then(setZhviData)
       .catch(() => {});
   }, []);
 
@@ -241,8 +349,8 @@ export default function HousingMap({
   return (
     <div className="relative w-full h-full">
       <MapControls
-        showNeighborhoods={showNeighborhoods}
-        setShowNeighborhoods={setShowNeighborhoods}
+        showPriceTrends={showPriceTrends}
+        setShowPriceTrends={onShowPriceTrendsChange}
         showIsochrones={showIsochrones}
         setShowIsochrones={setShowIsochrones}
         showFloodZones={showFloodZones}
@@ -257,8 +365,8 @@ export default function HousingMap({
         zoomControl={false}
         // Render all vector layers (CircleMarkers, GeoJSON polygons) to a
         // single <canvas> instead of individual SVG nodes. With ~5k pins
-        // plus thousands of Census tract polylines, SVG mode produces a
-        // ~10k-node DOM that the browser can't lay out fast enough — the
+        // plus the zip-code price-trend polygons, SVG mode produces a
+        // multi-thousand-node DOM that the browser can't lay out fast — the
         // main thread is blocked for 30+ seconds on initial render and
         // every interaction (including click handler attachment) is
         // queued behind it. Canvas mode collapses all of that into one
@@ -273,11 +381,48 @@ export default function HousingMap({
           attribution='&copy; <a href="https://stadiamaps.com/">Stadia</a>'
         />
 
-        {/* Census tract boundaries */}
-        {showNeighborhoods && tractData && (
+        {/* Round 4: zip-code price-trend heat map. Polygons are colored
+            by the % change in Zillow Home Value Index over the active
+            period (set in the LeftPanel Price Trends section). The `key`
+            prop forces a remount when the period or visibility changes —
+            Leaflet caches style functions and won't recompute fills
+            otherwise. */}
+        {showPriceTrends && zipGeoData && zhviData && (
           <GeoJSON
-            data={tractData}
-            style={tractStyle}
+            key={`zhvi-${priceTrendMonths}`}
+            data={zipGeoData}
+            style={zipStyleFor(zhviData, priceTrendMonths)}
+            // The `key` above forces a remount on every period change so
+            // styles recompute. But in canvas-renderer mode, re-adding the
+            // layer puts it on top of the listing pins (canvas draw order
+            // is insertion order). bringToBack on the `add` event keeps
+            // the heat map below the pins on every remount.
+            eventHandlers={{
+              add: (e) => {
+                const layer = e.target as { bringToBack?: () => void };
+                layer.bringToBack?.();
+              },
+            }}
+            onEachFeature={(feature, layer) => {
+              const zip = feature?.properties?.zip;
+              if (!zip) return;
+              const series = zhviData.zips[zip];
+              const latest = series?.[series.length - 1]?.value;
+              const pct = pctChangeFor(zhviData, zip, priceTrendMonths);
+              const lines = [`<strong>${zip}</strong>`];
+              if (latest != null) {
+                lines.push(`$${Math.round(latest).toLocaleString()}`);
+              }
+              if (pct != null) {
+                lines.push(`${formatPeriod(priceTrendMonths)}: ${formatPct(pct)}`);
+              } else {
+                lines.push(`${formatPeriod(priceTrendMonths)}: no data`);
+              }
+              layer.bindTooltip(lines.join('<br/>'), {
+                sticky: true,
+                className: '!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none',
+              });
+            }}
           />
         )}
 

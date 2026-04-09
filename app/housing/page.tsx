@@ -137,6 +137,14 @@ export default function HousingPage() {
   const [isoLoading, setIsoLoading] = useState(false);
   const [isoFetchTrigger, setIsoFetchTrigger] = useState(0);
 
+  // Round 4: zip-code price trend heat map. Both pieces of state live here
+  // (the lowest common ancestor of HousingMap and LeftPanel) so they can be
+  // read by both children. The heat map renders in HousingMap; the period
+  // selector lives in a new "Price Trends" section in LeftPanel.
+  // Default: visible, period = 12 months.
+  const [showPriceTrends, setShowPriceTrends] = useState(true);
+  const [priceTrendMonths, setPriceTrendMonths] = useState(12);
+
   // Only fetch isochrones on explicit trigger (Go button or initial load)
   useEffect(() => {
     async function fetchIsochrones() {
@@ -510,6 +518,8 @@ export default function HousingPage() {
                 isochroneAddresses={isoAddresses}
                 onIsochroneAddressesChange={setIsoAddresses}
                 onIsochroneSubmit={triggerIsochroneFetch}
+                priceTrendMonths={priceTrendMonths}
+                onPriceTrendMonthsChange={setPriceTrendMonths}
               />
             </div>
           )}
@@ -523,6 +533,9 @@ export default function HousingPage() {
             isoPolygons={isoPolygons}
             isoIntersection={isoIntersection}
             onListingClick={setSelectedListingId}
+            showPriceTrends={showPriceTrends}
+            onShowPriceTrendsChange={setShowPriceTrends}
+            priceTrendMonths={priceTrendMonths}
           />
           {/* Refresh status banner — floats above the map, centered top.
               Active state shows a pill with the in-flight message; inactive

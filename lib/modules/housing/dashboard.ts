@@ -28,21 +28,27 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
 
   try {
     const zhviPath = path.join(process.cwd(), 'public', 'austin-zhvi.json');
-    const zhviData: { date: string; value: number }[] = JSON.parse(fs.readFileSync(zhviPath, 'utf8'));
+    // Round 4 changed the artifact shape from a flat array to an object
+    // with a `medianSeries` field (plus per-zip series for the heat map).
+    // Read medianSeries here.
+    const artifact: { medianSeries?: { date: string; value: number }[] } = JSON.parse(
+      fs.readFileSync(zhviPath, 'utf8')
+    );
+    const medianSeries = artifact.medianSeries ?? [];
 
-    if (zhviData.length > 0) {
-      const latest = zhviData[zhviData.length - 1].value;
+    if (medianSeries.length > 0) {
+      const latest = medianSeries[medianSeries.length - 1].value;
       priceStr = `$${Math.round(latest / 1000)}K`;
 
       // Compute real trend from 3 months ago
-      if (zhviData.length >= 4) {
-        const threeMonthsAgo = zhviData[zhviData.length - 4].value;
+      if (medianSeries.length >= 4) {
+        const threeMonthsAgo = medianSeries[medianSeries.length - 4].value;
         const pctChange = ((latest - threeMonthsAgo) / threeMonthsAgo) * 100;
         trendDirection = pctChange < 0 ? 'down' : 'up';
         trend = `${trendDirection === 'down' ? '↓' : '↑'}${Math.abs(pctChange).toFixed(1)}% (90d)`;
       }
 
-      sparkline = zhviData.slice(-12).map((d) => d.value / 1000);
+      sparkline = medianSeries.slice(-12).map((d) => d.value / 1000);
     }
   } catch {
     // No ZHVI data available

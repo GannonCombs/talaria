@@ -1,9 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Bookmark, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bookmark, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2, TrendingUp } from 'lucide-react';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
 import { formatRelativeFromNow } from '@/lib/time';
+
+// Inlined here (rather than imported from ./HousingMap) so this file
+// stays SSR-safe — HousingMap.tsx pulls in Leaflet at module load,
+// which references `window` and breaks server rendering.
+function formatPeriod(months: number): string {
+  if (months === 1) return '1 month';
+  if (months < 12) return `${months} months`;
+  if (months === 12) return '1 year';
+  if (months % 12 === 0) return `${months / 12} years`;
+  return `${months} months`;
+}
 
 interface Filters {
   priceMin: number;
@@ -59,9 +70,22 @@ interface LeftPanelProps {
   isochroneAddresses: IsochroneAddress[];
   onIsochroneAddressesChange: (addrs: IsochroneAddress[]) => void;
   onIsochroneSubmit: () => void;
+  // Round 4: Price Trends — period control for the zip-code heat map.
+  // Owned by the parent housing page so HousingMap and LeftPanel read
+  // from the same source. Visibility toggle stays in the map controls.
+  priceTrendMonths: number;
+  onPriceTrendMonthsChange: (months: number) => void;
 }
 
-type SectionView = 'menu' | 'isochrones' | 'scoring' | 'budget';
+type SectionView = 'menu' | 'isochrones' | 'scoring' | 'budget' | 'priceTrends';
+
+const PRICE_TREND_PRESETS: ReadonlyArray<{ months: number; label: string }> = [
+  { months: 1, label: '1mo' },
+  { months: 6, label: '6mo' },
+  { months: 12, label: '1yr' },
+  { months: 24, label: '2yr' },
+  { months: 60, label: '5yr' },
+];
 
 function WeightSlider({
   label,
@@ -109,6 +133,8 @@ export default function LeftPanel({
   isochroneAddresses,
   onIsochroneAddressesChange,
   onIsochroneSubmit,
+  priceTrendMonths,
+  onPriceTrendMonthsChange,
 }: LeftPanelProps) {
   const [section, setSection] = useState<SectionView>('menu');
   const [moreOptions, setMoreOptions] = useState(false);
@@ -372,6 +398,103 @@ export default function LeftPanel({
     );
   }
 
+  // ── Section: Price Trends (Round 4) ──
+  if (section === 'priceTrends') {
+    return (
+      <div className="h-full overflow-y-auto border-r border-outline bg-background p-5">
+        <button
+          onClick={() => setSection('menu')}
+          className="flex items-center gap-2 text-on-surface-variant hover:text-on-surface mb-4"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-sm">Back</span>
+        </button>
+        <h3 className="section-header text-xs text-on-surface mb-4">Price Trends</h3>
+        <p className="text-xs text-on-surface-variant mb-4">
+          Color zip codes on the map by their Zillow Home Value Index change
+          over the period below. Toggle the layer on/off via the &ldquo;Price
+          Trends&rdquo; checkbox in the upper-right map controls.
+        </p>
+
+        {/* Period control */}
+        <div className="border border-outline p-4 space-y-4">
+          <div>
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="text-xs text-on-surface-variant uppercase tracking-wider">
+                Period
+              </span>
+              <span className="font-mono text-sm text-on-surface">
+                {formatPeriod(priceTrendMonths)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={60}
+              step={1}
+              value={priceTrendMonths}
+              onChange={(e) => onPriceTrendMonthsChange(Number(e.target.value))}
+              className="w-full h-1 accent-primary bg-surface-container-highest appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full"
+            />
+            <div className="flex justify-between text-[10px] text-on-surface-variant font-mono mt-1">
+              <span>1 mo</span>
+              <span>5 yr</span>
+            </div>
+          </div>
+
+          {/* Quick presets */}
+          <div>
+            <div className="text-[10px] text-on-surface-variant uppercase tracking-wider mb-2">
+              Quick set
+            </div>
+            <div className="flex gap-1">
+              {PRICE_TREND_PRESETS.map((p) => (
+                <button
+                  key={p.months}
+                  onClick={() => onPriceTrendMonthsChange(p.months)}
+                  className={`flex-1 h-8 text-xs font-mono border ${
+                    priceTrendMonths === p.months
+                      ? 'border-primary text-primary bg-primary/10'
+                      : 'border-outline text-on-surface-variant hover:border-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Color legend */}
+        <div className="mt-5">
+          <div className="text-[10px] text-on-surface-variant uppercase tracking-wider mb-2">
+            Color scale
+          </div>
+          <div
+            className="h-3 w-full"
+            style={{
+              background:
+                'linear-gradient(to right, rgb(229, 83, 75), rgb(48, 54, 61), rgb(63, 185, 80))',
+            }}
+          />
+          <div className="flex justify-between text-[10px] text-on-surface-variant font-mono mt-1">
+            <span>−10% or worse</span>
+            <span>flat</span>
+            <span>+10% or better</span>
+          </div>
+        </div>
+
+        {/* Data source attribution */}
+        <p className="text-[10px] text-on-surface-variant mt-6 leading-relaxed">
+          Source: Zillow Home Value Index (ZHVI), middle tier, smoothed,
+          seasonally adjusted. Free public dataset, refreshed monthly when
+          <span className="font-mono"> npm run fetch-zhvi </span>
+          is run.
+        </p>
+      </div>
+    );
+  }
+
   // ── Default: Filters + Section Menu ──
   return (
     <div className="h-full overflow-y-auto border-r border-outline bg-background p-5 flex flex-col">
@@ -622,6 +745,16 @@ export default function LeftPanel({
           <div className="flex items-center gap-3">
             <DollarSign size={16} />
             <span className="text-sm">Budget & Loan</span>
+          </div>
+          <ChevronRight size={16} />
+        </button>
+        <button
+          onClick={() => setSection('priceTrends')}
+          className="w-full flex items-center justify-between p-3 text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
+        >
+          <div className="flex items-center gap-3">
+            <TrendingUp size={16} />
+            <span className="text-sm">Price Trends</span>
           </div>
           <ChevronRight size={16} />
         </button>

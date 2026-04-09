@@ -59,9 +59,13 @@ export default function RightPanel({
   const [pmmsHistory, setPmmsHistory] = useState<{ date: string; value: number }[]>([]);
 
   useEffect(() => {
+    // Round 4 changed austin-zhvi.json from a flat array to an object
+    // with a `medianSeries` field. Read that field for the sparkline.
     fetch('/austin-zhvi.json')
       .then((r) => r.json())
-      .then(setPriceHistory)
+      .then((d: { medianSeries?: { date: string; value: number }[] }) => {
+        setPriceHistory(d.medianSeries ?? []);
+      })
       .catch(() => {});
     fetch('/us-30yr-pmms.json')
       .then((r) => r.json())
@@ -242,7 +246,7 @@ export default function RightPanel({
               </ResponsiveContainer>
             </div>
             <div className="text-[10px] text-on-surface-variant font-mono mt-1">
-              Austin, TX · Zillow ZHVI · 36mo
+              Austin, TX · Zillow ZHVI
             </div>
           </>
         ) : (

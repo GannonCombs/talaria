@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { CreditCard, Zap, ChevronLeft, ChevronRight, Download, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Search } from 'lucide-react';
 import { formatTxnTimestamp } from '@/lib/time';
+import { RailIcon } from '@/components/shared/PaymentIcons';
 
 interface Transaction {
   id: number;
@@ -137,14 +138,9 @@ export default function FullTransactionTable({
                     {tx.endpoint ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {tx.rail === 'tempo' ? (
-                      <Zap size={16} className="inline text-primary" />
-                    ) : (
-                      <CreditCard
-                        size={16}
-                        className="inline text-on-surface-variant"
-                      />
-                    )}
+                    <span className="inline-flex justify-center text-on-surface-variant">
+                      <RailIcon rail={tx.rail} />
+                    </span>
                   </td>
                   <td className="px-4 py-3 font-mono text-sm font-bold text-right text-on-surface">
                     ${tx.cost_usd.toFixed(3)}

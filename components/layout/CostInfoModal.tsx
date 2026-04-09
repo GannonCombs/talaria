@@ -58,6 +58,14 @@ const FREE_ACTIONS: CostRow[] = [
     frequency: 'Once on /housing load',
   },
   {
+    action: 'ZIP price-trend heat map',
+    service: 'Zillow ZHVI + Census ZCTA polygons (static files)',
+    cost: 'Free',
+    frequency: 'Manual via scripts/fetch-zhvi.mjs (rerun monthly)',
+    notes:
+      'Pulls the public Zillow ZHVI CSV (~5 MB) plus a state-level zip GeoJSON, filters both to ~87 Austin metro zips, and writes the cached artifacts to public/austin-zhvi.json + public/austin-zips.geojson. The map renders entirely client-side from those files.',
+  },
+  {
     action: 'Map tiles',
     service: 'Stadia Maps',
     cost: 'Free',
