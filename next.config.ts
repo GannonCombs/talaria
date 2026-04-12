@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['better-sqlite3', 'agentcash', 'mppx', 'viem'],
+  serverExternalPackages: ['better-sqlite3', 'mppx', 'viem', 'keytar'],
   turbopack: {
     root: __dirname,
   },

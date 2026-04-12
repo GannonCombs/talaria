@@ -15,6 +15,7 @@
     "@turf/turf": "^7.3.4",
     "better-sqlite3": "^12.8.0",
     "ethers": "^6.16.0",
+    "keytar": "^7.9.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.7.0",
     "mppx": "^0.4.12",

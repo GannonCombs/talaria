@@ -107,10 +107,9 @@ function buildSchema(db: Database.Database): void {
 }
 
 function resetDatabase(db: Database.Database): void {
-  // Preserve wallet keys across resets. Note: real PKs live in
-  // ~/.agentcash/, NOT in talaria.db. This pref only caches a derived
-  // public Solana address for display, but we keep the same shape so
-  // any future cached wallet metadata is also preserved.
+  // Preserve wallet-related preferences across resets. Private keys
+  // live in the OS keychain (see lib/security/keychain.ts), not in
+  // talaria.db. These prefs cache display metadata only.
   let walletKeys: { key: string; value: string }[] = [];
   try {
     walletKeys = db

@@ -1,25 +1,18 @@
 // Server-side MPP client. Wraps mppx/client + viem so any server route
-// can call paid MPP endpoints natively. The agentcash CLI is a JSON-only
-// stdout tool — it can't pass through binary response bodies (images,
-// audio, video). This module talks to MPP services via the standard
-// `mppx/client` library and returns real Response objects, so callers
-// can `.arrayBuffer()` or `.blob()` the result.
+// can call paid MPP endpoints natively. Returns real Response objects,
+// so callers can `.arrayBuffer()` or `.blob()` the result.
 //
 // Strict server-only — never import from a client component. The wallet
-// private key is read from `~/.agentcash/wallet.json` (the same location
-// agentcash uses) and never leaves Node.
+// private key is read from the OS keychain (see lib/security/keychain.ts)
+// and never leaves Node.
 
 // Server-only by virtue of node:fs/path/os imports — Next won't bundle
 // these to the client. Do not import this module from client components.
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
 import { Mppx, tempo } from 'mppx/client';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getDb } from './db';
 import { logMppTransaction } from './mpp';
-
-const AGENTCASH_WALLET_PATH = path.join(os.homedir(), '.agentcash', 'wallet.json');
+import { KeychainManager } from './security/keychain';
 
 // ── DIAGNOSTIC: per-fetch timing wrapper ─────────────────────────────────
 //
@@ -82,25 +75,17 @@ installFetchTiming();
 
 // ────────────────────────────────────────────────────────────────────────
 
-interface AgentCashWallet {
-  privateKey: `0x${string}`;
-  address: string;
-}
+let _clientPromise: Promise<ReturnType<typeof Mppx.create>> | null = null;
 
-let _client: ReturnType<typeof buildClient> | null = null;
-
-function loadWallet(): AgentCashWallet {
-  const raw = fs.readFileSync(AGENTCASH_WALLET_PATH, 'utf8');
-  const parsed = JSON.parse(raw);
-  if (typeof parsed?.privateKey !== 'string' || !parsed.privateKey.startsWith('0x')) {
-    throw new Error('Invalid wallet.json format at ' + AGENTCASH_WALLET_PATH);
+async function buildClient() {
+  const privateKey = await KeychainManager.getEvmKey();
+  if (!privateKey) {
+    throw new Error(
+      'No EVM key found in keychain. Run: npx tsx scripts/migrate-wallet.ts'
+    );
   }
-  return parsed as AgentCashWallet;
-}
-
-function buildClient() {
-  const wallet = loadWallet();
-  const account = privateKeyToAccount(wallet.privateKey);
+  const hex = (privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`) as `0x${string}`;
+  const account = privateKeyToAccount(hex);
   return Mppx.create({
     polyfill: false,
     methods: [tempo({ account })],
@@ -108,8 +93,8 @@ function buildClient() {
 }
 
 function getMppxClient() {
-  if (!_client) _client = buildClient();
-  return _client;
+  if (!_clientPromise) _clientPromise = buildClient();
+  return _clientPromise;
 }
 
 // Real Response object — caller chooses how to read the body. Use this
@@ -122,7 +107,7 @@ export async function paidFetch(
   url: string,
   init?: RequestInit
 ): Promise<Response> {
-  const client = getMppxClient();
+  const client = await getMppxClient();
   return client.fetch(url, init);
 }
 

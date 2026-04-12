@@ -1,6 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import { KeychainManager } from './security/keychain';
 
 export interface ChainBalance {
   chain: string;
@@ -26,54 +24,10 @@ export interface WalletInfo {
   linkedAccounts: LinkedAccount[];
 }
 
-// ── AgentCash wallet ──
+// ── Wallet addresses (derived from OS keychain keys) ──
 
-const AGENTCASH_WALLET_PATH = path.join(os.homedir(), '.agentcash', 'wallet.json');
-
-interface AgentCashWallet {
-  privateKey: string;
-  address: string;
-  createdAt: string;
-}
-
-function loadAgentCashWallet(): AgentCashWallet | null {
-  try {
-    const raw = fs.readFileSync(AGENTCASH_WALLET_PATH, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function walletExists(): boolean {
-  return loadAgentCashWallet() !== null;
-}
-
-// Get the AgentCash Solana address (cached in DB after first fetch)
-function getAgentCashSolanaAddress(): string {
-  try {
-    const { getDb } = require('./db');
-    const db = getDb();
-    const row = db
-      .prepare("SELECT value FROM user_preferences WHERE key = 'wallet.agentcash_solana'")
-      .get() as { value: string } | undefined;
-    if (row?.value) return row.value;
-
-    // Fetch from agentcash CLI and cache
-    const { execSync } = require('child_process');
-    const output = execSync('npx agentcash@latest accounts --format json', { timeout: 15000, stdio: 'pipe' }).toString();
-    const data = JSON.parse(output);
-    const solAccount = data.data?.accounts?.find((a: { network: string }) => a.network === 'solana');
-    if (solAccount?.address) {
-      db.prepare(
-        `INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES (?, ?, datetime('now'))`
-      ).run('wallet.agentcash_solana', solAccount.address);
-      return solAccount.address;
-    }
-    return '';
-  } catch {
-    return '';
-  }
+export async function walletExists(): Promise<boolean> {
+  return KeychainManager.hasEvmKey();
 }
 
 function truncateAddress(addr: string): string {
@@ -82,9 +36,9 @@ function truncateAddress(addr: string): string {
 }
 
 export async function getWalletBalance(): Promise<WalletInfo> {
-  const acWallet = loadAgentCashWallet();
+  const evmAddress = await KeychainManager.getEvmAddress();
 
-  if (!acWallet) {
+  if (!evmAddress) {
     return {
       exists: false,
       evmAddress: '',
@@ -98,8 +52,7 @@ export async function getWalletBalance(): Promise<WalletInfo> {
     };
   }
 
-  const evmAddress = acWallet.address;
-  const solanaAddress = getAgentCashSolanaAddress();
+  const solanaAddress = (await KeychainManager.getSolanaAddress()) ?? '';
 
   // Query all balances in parallel
   const [tempoUsdc, baseUsdc, solBalance] = await Promise.all([
@@ -134,15 +87,14 @@ export async function getWalletBalance(): Promise<WalletInfo> {
 // ── Wallet creation (via AgentCash) ──
 
 export async function createWallet(): Promise<{ evmAddress: string; solanaAddress: string }> {
-  // If AgentCash wallet already exists, just return its info
-  const existing = loadAgentCashWallet();
-  if (existing) {
-    const solAddr = getAgentCashSolanaAddress();
-    return { evmAddress: existing.address, solanaAddress: solAddr };
+  const evmAddr = await KeychainManager.getEvmAddress();
+  const solAddr = await KeychainManager.getSolanaAddress();
+
+  if (evmAddr) {
+    return { evmAddress: evmAddr, solanaAddress: solAddr ?? '' };
   }
 
-  // Otherwise, tell the user to run AgentCash onboarding
-  throw new Error('Run "npx agentcash onboard" in your terminal to create a wallet');
+  throw new Error('Run "npx tsx scripts/migrate-wallet.ts" to create a wallet');
 }
 
 // ── On-chain balance queries ──
