@@ -55,6 +55,8 @@ interface HousingMapProps {
   isoPolygons?: IsoPolygon[];
   isoIntersection?: [number, number][][];
   onListingClick?: (id: number) => void;
+  highlightedListingId?: number | null;  // hover highlight (visual only)
+  focusedListingId?: number | null;      // click → fly to + highlight
   // Round 4: zip-code price trend heat map. Visibility toggle is owned by
   // the parent (housing page) so the LeftPanel section can read the same
   // state. The period itself is set in LeftPanel — HousingMap only reads it.
@@ -147,6 +149,31 @@ function MapControls({
 function MapResizer() {
   const map = useMap();
   setTimeout(() => map.invalidateSize(), 100);
+  return null;
+}
+
+// Fly to a highlighted listing (triggered by Top Matches click).
+// Only flies on click (highlightedId change), not on hover.
+function FlyToHighlighted({ listings, highlightedId }: {
+  listings: ListingPin[];
+  highlightedId?: number | null;
+}) {
+  const map = useMap();
+  const prevId = useRef<number | null>(null);
+
+  useEffect(() => {
+    // Only fly when the ID changes to a non-null value (click, not hover-off)
+    if (highlightedId && highlightedId !== prevId.current) {
+      const listing = listings.find((l) => l.id === highlightedId);
+      if (listing) {
+        map.flyTo([listing.latitude, listing.longitude], Math.max(map.getZoom(), 14), {
+          duration: 0.8,
+        });
+      }
+    }
+    prevId.current = highlightedId ?? null;
+  }, [highlightedId, listings, map]);
+
   return null;
 }
 
@@ -296,6 +323,8 @@ export default function HousingMap({
   isoPolygons = [],
   isoIntersection,
   onListingClick,
+  highlightedListingId,
+  focusedListingId,
   showPriceTrends,
   onShowPriceTrendsChange,
   priceTrendMonths,
@@ -507,9 +536,11 @@ export default function HousingMap({
           </>
         )}
 
-        {/* Listing pins. Click handling is delegated to ListingClickHandler
-            above — per-marker handlers are unreliable in canvas mode. */}
-        {listings.map((listing) => (
+        {/* Listing pins — non-highlighted first, then highlighted on top.
+            Click handling is delegated to ListingClickHandler above. */}
+        {listings
+          .filter((l) => l.id !== highlightedListingId && l.id !== focusedListingId)
+          .map((listing) => (
           <CircleMarker
             key={listing.id}
             center={[listing.latitude, listing.longitude]}
@@ -541,7 +572,47 @@ export default function HousingMap({
               </div>
             </Tooltip>
           </CircleMarker>
-        ))}
+          ))}
+
+        {/* Highlighted pin rendered last = on top of all other pins */}
+        {listings
+          .filter((l) => l.id === highlightedListingId || l.id === focusedListingId)
+          .map((listing) => (
+          <CircleMarker
+            key={`hl-${listing.id}`}
+            center={[listing.latitude, listing.longitude]}
+            radius={12}
+            pathOptions={{
+              color: '#ffcf91',
+              fillColor: '#ffcf91',
+              fillOpacity: 1,
+              weight: 3,
+            }}
+          >
+            <Tooltip
+              className="!bg-surface-container !border-outline !text-on-surface !text-xs !rounded-none !shadow-none"
+            >
+              <div className="font-sans">
+                <strong>{listing.address}</strong>
+                <br />
+                <span className="font-mono">
+                  ${listing.price.toLocaleString()}
+                </span>
+                {listing.dealScore !== null && (
+                  <>
+                    <br />
+                    Score: {listing.dealScore}
+                  </>
+                )}
+                <br />
+                {listing.beds ?? '?'}bd / {listing.baths ?? '?'}ba / {listing.sqft != null ? `${listing.sqft.toLocaleString()} sqft` : 'sqft unknown'}
+              </div>
+            </Tooltip>
+          </CircleMarker>
+          ))}
+
+        {/* Fly to focused listing when it changes (pin or Top Matches click) */}
+        <FlyToHighlighted listings={listings} highlightedId={focusedListingId} />
       </MapContainer>
     </div>
   );

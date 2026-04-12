@@ -1,123 +1,62 @@
-// Austin PD crime data fetcher. Queries the City of Austin open data portal
-// (Socrata API), aggregates crime incidents by zip code over the past year,
-// and computes a safety index (0-10, higher = safer).
+// Per-listing crime data via Austin PD open data + Census block group centroids.
 //
-// Free, no API key needed. Rate-limited to ~1000 requests/hour by Socrata.
-// We make 1 request per refresh, so this is well within limits.
+// 1. Fetches annual crime counts by Census block group from Austin PD (free)
+// 2. Fetches block group centroids from Census TIGERweb (free, cached in memory)
+// 3. For each listing (has lat/lon), finds the nearest block group centroid
+//    and stores that block group's raw incident count as listing.crime_count
+//
+// No normalization at storage time — raw counts are preserved.
+// The scoring algorithm normalizes across all listings at score time.
 
 import { getDb } from '@/lib/db';
 import { setWiredDimension } from './scoring';
 
 const AUSTIN_CRIME_API = 'https://data.austintexas.gov/resource/fdj4-gpfu.json';
+const TIGERWEB_API = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/10/query';
 
-// Census tract → target zip mapping for Travis County (48453).
-// Generated from Census TIGERweb tract centroids, mapped to nearest target zip.
-// The APD data has `census_block_group` which is: state(2) + county(3) + tract(6) + blockgroup(1).
-// We extract the tract (chars 4-9 of the 10-char census_block_group) and map to zip.
-const TRACT_TO_ZIP: Record<string, string> = {
-  '000101': '78731', '000102': '78731', '000203': '78731', '000204': '78731',
-  '000205': '78731', '000206': '78731', '000302': '78731', '000304': '78731',
-  '000305': '78731', '000307': '78731', '000308': '78731', '000309': '78731',
-  '000401': '78704', '000402': '78704', '000500': '78731', '000601': '78704',
-  '000605': '78704', '000606': '78704', '000607': '78704', '000608': '78704',
-  '000700': '78704', '000801': '78704', '000802': '78704', '000803': '78704',
-  '000804': '78704', '000901': '78704', '000902': '78704', '001000': '78704',
-  '001101': '78704', '001102': '78704', '001103': '78704', '001200': '78704',
-  '001304': '78704', '001307': '78704', '001308': '78704', '001309': '78704',
-  '001310': '78704', '001311': '78704', '001312': '78704', '001401': '78704',
-  '001402': '78704', '001403': '78704', '001501': '78731', '001503': '78731',
-  '001504': '78731', '001505': '78731', '001602': '78704', '001603': '78731',
-  '001604': '78731', '001605': '78704', '001606': '78731', '001910': '78704',
-  '001911': '78704', '001912': '78731', '001913': '78731', '001914': '78749',
-  '001915': '78749', '001916': '78749', '001917': '78749', '001918': '78704',
-  '001919': '78704', '001920': '78749', '001921': '78749', '001922': '78704',
-  '001923': '78704', '002002': '78704', '002003': '78704', '002004': '78704',
-  '002006': '78704', '002007': '78704', '002104': '78731', '002105': '78731',
-  '002106': '78731', '002107': '78731', '002108': '78731', '002109': '78704',
-  '002110': '78704', '002111': '78704', '002112': '78731', '002113': '78731',
-  '002201': '78731', '002211': '78704', '002213': '78731', '002214': '78704',
-  '002215': '78704', '002216': '78704', '002217': '78731', '002218': '78731',
-  '002219': '78731', '002220': '78731', '002221': '78731', '002222': '78731',
-  '002304': '78704', '002307': '78704', '002310': '78704', '002313': '78704',
-  '002314': '78704', '002315': '78704', '002316': '78704', '002319': '78745',
-  '002320': '78704', '002321': '78704', '002322': '78704', '002323': '78704',
-  '002324': '78704', '002325': '78704', '002326': '78704', '002327': '78704',
-  '002403': '78745', '002407': '78748', '002409': '78745', '002410': '78745',
-  '002411': '78745', '002412': '78745', '002413': '78745', '002419': '78745',
-  '002422': '78745', '002423': '78745', '002424': '78745', '002430': '78745',
-  '002432': '78745', '002434': '78745', '002436': '78745', '002437': '78745',
-  '002438': '78748', '002439': '78745', '002440': '78745', '002441': '78745',
-  '002442': '78745', '002443': '78745', '002444': '78745', '002445': '78745',
-  '002446': '78748', '002447': '78745', '002448': '78745', '002449': '78745',
-  '002450': '78745', '002451': '78745', '002452': '78745', '002453': '78745',
-  '002500': '78731', '030000': '78731', '030100': '78731', '030200': '78731',
-  '030300': '78704', '030400': '78745', '030500': '78731', '030600': '78731',
-  '030700': '78731', '030800': '78731', '030900': '78745', '031000': '78749',
-  '031100': '78749', '031200': '78749', '031300': '78748', '031400': '78731',
-  '031500': '78749', '031600': '78731', '031700': '78748', '031800': '78748',
-  '031900': '78748', '032000': '78749', '032100': '78749', '032200': '78731',
-  '032300': '78731', '032400': '78731', '032500': '78731', '032600': '78731',
-  '032700': '78731', '032800': '78731', '032900': '78731', '033000': '78749',
-  '033100': '78749', '033200': '78748', '033300': '78748', '033400': '78749',
-  '033500': '78749', '033600': '78749', '033700': '78731', '033800': '78731',
-  '033900': '78731', '034000': '78749', '034100': '78731', '034200': '78731',
-  '034300': '78731', '034400': '78731', '034500': '78731', '034600': '78731',
-  '034700': '78749', '034800': '78749', '034900': '78731', '035000': '78731',
-  '035100': '78749', '035200': '78749', '035300': '78749', '035400': '78749',
-  '035500': '78731', '035600': '78731', '035700': '78731', '035800': '78731',
-  '035900': '78731', '036000': '78731', '036100': '78731', '036200': '78731',
-  '036300': '78731', '036400': '78731', '036500': '78749', '036600': '78749',
-  '036700': '78749', '036800': '78748', '036900': '78749', '037000': '78749',
-  '037100': '78748', '037200': '78748', '037300': '78731', '037400': '78749',
-  '037500': '78731', '037600': '78731', '040000': '78731', '040100': '78731',
-  '040200': '78731', '040300': '78731', '040400': '78731', '040500': '78731',
-  '040600': '78731', '040700': '78731', '040800': '78731', '040900': '78731',
-  '041000': '78731', '041100': '78731', '041200': '78731', '041300': '78731',
-  '041400': '78731', '041500': '78731', '041600': '78731', '041700': '78731',
-  '041800': '78731', '041900': '78731', '042000': '78731', '042100': '78731',
-  '042200': '78731', '042300': '78731', '042400': '78731', '042500': '78731',
-  '042600': '78731', '042700': '78731', '042800': '78731', '042900': '78731',
-  '043000': '78731', '043100': '78731', '043200': '78731', '043300': '78731',
-  '043400': '78731', '043500': '78731', '043600': '78731', '043700': '78731',
-  '043800': '78731', '043900': '78731', '044000': '78731', '044100': '78731',
-  '044200': '78731', '044300': '78731', '044400': '78731', '044500': '78731',
-  '044600': '78731', '044700': '78731', '044800': '78731', '044900': '78731',
-  '045000': '78731', '045100': '78731', '045200': '78731', '045300': '78731',
-  '045400': '78731', '045500': '78731', '045600': '78731', '045700': '78731',
-  '045800': '78731', '045900': '78731', '046000': '78731', '046100': '78731',
-  '046200': '78731', '046300': '78731', '046400': '78731', '046500': '78731',
-  '046600': '78731', '046700': '78731', '046800': '78731', '046900': '78731',
-  '047000': '78731', '980000': '78745',
-};
-
-const TARGET_ZIPS = new Set(['78745', '78704', '78749', '78748', '78731']);
-
-function extractTract(censusBlockGroup: string): string {
-  // Census block group format: state(2) + county(1) + tract(6) + blockgroup(1)
-  // APD data uses a 10-char format like "4530XXXXXXB"
-  // The tract is chars 3-8 (0-indexed), i.e. after the 3-char county prefix "453"
-  if (censusBlockGroup.length === 10) {
-    return censusBlockGroup.slice(3, 9);
-  }
-  return '';
+interface BlockGroupCentroid {
+  geoid: string; // e.g. "484530319002" → last 10 chars match APD format "4530319002"
+  lat: number;
+  lon: number;
 }
 
-interface CrimeRecord {
-  census_block_group?: string;
-  occ_date?: string;
-  crime_type?: string;
+interface CrimeByCbg {
+  census_block_group: string;
+  count: string;
 }
 
-export async function fetchCrimeData(): Promise<{
-  updated: number;
-  incidents: Record<string, number>;
-}> {
-  // Fetch last 12 months of crime data from Austin PD
+// ── Fetch block group centroids for Travis County ───────────────────────
+
+let _cachedCentroids: BlockGroupCentroid[] | null = null;
+
+async function getBlockGroupCentroids(): Promise<BlockGroupCentroid[]> {
+  if (_cachedCentroids) return _cachedCentroids;
+
+  const url = `${TIGERWEB_API}?where=STATE%3D%2748%27+AND+COUNTY%3D%27453%27` +
+    `&outFields=GEOID,CENTLAT,CENTLON&f=json&resultRecordCount=1000&returnGeometry=false`;
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`TIGERweb API returned ${res.status}`);
+
+  const data = await res.json();
+  const features = data.features as Array<{ attributes: { GEOID: string; CENTLAT: string; CENTLON: string } }>;
+
+  _cachedCentroids = features.map((f) => ({
+    geoid: f.attributes.GEOID,
+    lat: parseFloat(f.attributes.CENTLAT),
+    lon: parseFloat(f.attributes.CENTLON),
+  }));
+
+  return _cachedCentroids;
+}
+
+// ── Fetch crime counts by block group from Austin PD ────────────────────
+
+async function getCrimeCounts(): Promise<Map<string, number>> {
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
   const dateStr = oneYearAgo.toISOString().split('T')[0];
 
-  // Socrata API supports SoQL queries. Fetch aggregated counts by census block group.
   const url = `${AUSTIN_CRIME_API}?$select=census_block_group,count(*)` +
     `&$where=occ_date>'${dateStr}' AND census_block_group IS NOT NULL` +
     `&$group=census_block_group&$limit=5000`;
@@ -125,46 +64,86 @@ export async function fetchCrimeData(): Promise<{
   const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`Austin PD API returned ${res.status}`);
 
-  const data = (await res.json()) as Array<{ census_block_group: string; count: string }>;
+  const data = (await res.json()) as CrimeByCbg[];
 
-  // Aggregate by zip code using our tract mapping
-  const zipCounts: Record<string, number> = {};
-  for (const zip of TARGET_ZIPS) zipCounts[zip] = 0;
-
+  // APD uses 10-char format "453XXXXXXB", TIGERweb uses 12-char "48453XXXXXXB"
+  // Map both to the 10-char APD format for matching
+  const counts = new Map<string, number>();
   for (const row of data) {
-    const tract = extractTract(row.census_block_group);
-    const zip = TRACT_TO_ZIP[tract];
-    if (zip && TARGET_ZIPS.has(zip)) {
-      zipCounts[zip] += parseInt(row.count, 10);
+    counts.set(row.census_block_group, parseInt(row.count, 10));
+  }
+  return counts;
+}
+
+// ── Find nearest block group for a lat/lon ──────────────────────────────
+
+function distSq(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dlat = lat1 - lat2;
+  const dlon = lon1 - lon2;
+  return dlat * dlat + dlon * dlon;
+}
+
+function findNearestBlockGroup(
+  lat: number,
+  lon: number,
+  centroids: BlockGroupCentroid[],
+): BlockGroupCentroid | null {
+  let best: BlockGroupCentroid | null = null;
+  let bestDist = Infinity;
+
+  for (const c of centroids) {
+    const d = distSq(lat, lon, c.lat, c.lon);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
     }
   }
+  return best;
+}
 
-  // Convert incident counts to safety index (0-10, higher = safer)
-  // Use inverse normalization: zip with fewest incidents = 10, most = 0
-  const counts = Object.values(zipCounts);
-  const minCount = Math.min(...counts);
-  const maxCount = Math.max(...counts);
-  const range = maxCount - minCount;
+// ── Main: fetch crime data and assign to listings ───────────────────────
+
+export async function fetchCrimeData(): Promise<{
+  listingsUpdated: number;
+  blockGroupsWithCrime: number;
+}> {
+  const [centroids, crimeCounts] = await Promise.all([
+    getBlockGroupCentroids(),
+    getCrimeCounts(),
+  ]);
 
   const db = getDb();
-  const update = db.prepare(
-    'UPDATE housing_neighborhoods SET crime_index = ?, fetched_at = datetime(\'now\') WHERE zip = ?'
-  );
 
+  // Load all listings with coordinates
+  const listings = db
+    .prepare('SELECT id, latitude, longitude FROM housing_listings WHERE latitude IS NOT NULL AND longitude IS NOT NULL')
+    .all() as Array<{ id: number; latitude: number; longitude: number }>;
+
+  // For each listing, find nearest block group and look up its crime count
+  const update = db.prepare('UPDATE housing_listings SET crime_count = ? WHERE id = ?');
   let updated = 0;
+
   const updateAll = db.transaction(() => {
-    for (const [zip, count] of Object.entries(zipCounts)) {
-      // Invert: fewer incidents = higher safety score
-      const normalized = range === 0 ? 5 : ((maxCount - count) / range) * 10;
-      const safetyIndex = Math.round(normalized * 10) / 10; // 1 decimal
-      update.run(safetyIndex, zip);
+    for (const listing of listings) {
+      const nearest = findNearestBlockGroup(listing.latitude, listing.longitude, centroids);
+      if (!nearest) continue;
+
+      // Convert TIGERweb 12-char GEOID to APD 10-char format
+      // TIGERweb: "484530319002" → APD: "4530319002" (drop state prefix "48")
+      const apdKey = nearest.geoid.slice(2);
+      const count = crimeCounts.get(apdKey) ?? 0;
+
+      update.run(count, listing.id);
       updated++;
     }
   });
   updateAll();
 
-  // Mark crime as a wired dimension
+  // Mark crime as wired
   setWiredDimension('crime');
 
-  return { updated, incidents: zipCounts };
+  return {
+    listingsUpdated: updated,
+    blockGroupsWithCrime: crimeCounts.size,
+  };
 }

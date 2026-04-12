@@ -95,6 +95,13 @@ function runMigrations(db: Database.Database, fromVersion: number): void {
       insert.run(key, value);
     }
   }
+
+  if (fromVersion < 8) {
+    // Add per-listing crime data column for per-listing scoring.
+    if (!hasColumn(db, 'housing_listings', 'crime_count')) {
+      db.exec(`ALTER TABLE housing_listings ADD COLUMN crime_count INTEGER`);
+    }
+  }
 }
 
 function buildSchema(db: Database.Database): void {

@@ -35,6 +35,7 @@ export const HOUSING_TABLES_SQL = `
     last_seen TEXT NOT NULL DEFAULT (datetime('now')),
     deal_score REAL,
     monthly_cost REAL,
+    crime_count INTEGER,
     metadata TEXT,
     UNIQUE(address, zip)
   );

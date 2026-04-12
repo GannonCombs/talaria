@@ -129,6 +129,8 @@ export default function HousingPage() {
   const [rates, setRates] = useState<RateData[]>([]);
   const [prediction, setPrediction] = useState<FedPrediction | null>(null);
   const [selectedListingId, setSelectedListingId] = useState<number | null>(null);
+  const [hoveredListingId, setHoveredListingId] = useState<number | null>(null);
+  const [focusedListingId, setFocusedListingId] = useState<number | null>(null);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [isoAddresses, setIsoAddresses] = useState<IsochroneAddress[]>([
     { id: '1', label: 'Visa', address: '12301 Research Blvd, Building 3, Austin, TX 78759', lat: 30.4255, lng: -97.7529, color: '#46f1c5', driveMinutes: 30 },
@@ -386,13 +388,11 @@ export default function HousingPage() {
   // Static-ish data: scores, predictions, crime. Loaded once on mount.
   // Free data sources (crime, predictions) auto-fetch on every load.
   useEffect(() => {
-    // Fetch crime data (free), recompute all scores, then load results.
-    // The score recompute uses only wired dimensions — so with only crime
-    // wired, scores are 100% based on crime safety.
+    // Fetch crime data (free), recompute all listing scores, reload listings.
+    // With only crime wired, scores are 100% based on crime safety.
     fetch('/api/housing/crime', { method: 'POST' })
       .catch(() => {})
       .finally(() => {
-        // Recompute scores with current weights (wiredDimensions applied server-side)
         fetch('/api/housing/scores', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -400,12 +400,12 @@ export default function HousingPage() {
         })
           .catch(() => {})
           .finally(() => {
-            // Now load the freshly computed scores + wired dimensions
+            // Load wired dimensions + neighborhoods (for map/drawer)
             fetch('/api/housing/scores')
               .then((r) => r.ok ? r.json() : null)
               .then((data) => {
-                if (data?.neighborhoods) setNeighborhoods(data.neighborhoods);
                 if (data?.wiredDimensions) setWiredDimensions(data.wiredDimensions);
+                if (data?.neighborhoods) setNeighborhoods(data.neighborhoods);
               })
               .catch(() => {});
             // Reload listings to pick up new deal_score values
@@ -518,7 +518,9 @@ export default function HousingPage() {
             isochroneAddresses={isoAddresses}
             isoPolygons={isoPolygons}
             isoIntersection={isoIntersection}
-            onListingClick={setSelectedListingId}
+            onListingClick={(id) => { setSelectedListingId(id); setFocusedListingId(id); }}
+            highlightedListingId={hoveredListingId}
+            focusedListingId={focusedListingId}
             showPriceTrends={showPriceTrends}
             onShowPriceTrendsChange={setShowPriceTrends}
             priceTrendMonths={priceTrendMonths}
@@ -566,14 +568,15 @@ export default function HousingPage() {
               downPaymentPct={downPaymentPct}
               loanTermYears={30}
               allRates={rates}
-              onClose={() => setSelectedListingId(null)}
+              onClose={() => { setSelectedListingId(null); setFocusedListingId(null); }}
             />
           ) : (
             <RightPanel
               rates={rates}
               prediction={prediction}
               topListings={topListings}
-              onListingClick={setSelectedListingId}
+              onListingClick={(id) => { setSelectedListingId(id); setFocusedListingId(id); }}
+              onListingHover={setHoveredListingId}
             />
           )}
         </div>

@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { fetchCrimeData } from '@/lib/modules/housing/crime';
 
-// POST: fetch fresh crime data from Austin PD and update neighborhood scores
+// POST: fetch crime data from Austin PD, assign to listings, mark as wired
 export async function POST() {
   try {
     const result = await fetchCrimeData();
     return NextResponse.json({
       ok: true,
-      updated: result.updated,
-      incidents: result.incidents,
+      listingsUpdated: result.listingsUpdated,
+      blockGroupsWithCrime: result.blockGroupsWithCrime,
     });
   } catch (err) {
     return NextResponse.json(

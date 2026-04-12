@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { computeAllScores, getAllNeighborhoods, computeNeighborhoodScore, getWiredDimensions, type ScoringWeights } from '@/lib/modules/housing/scoring';
+import { computeAllScores, getWiredDimensions, type ScoringWeights } from '@/lib/modules/housing/scoring';
 import { getDb } from '@/lib/db';
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
@@ -12,33 +12,24 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   price: 8,
 };
 
-// GET: return current neighborhood scores + wired dimensions
+// GET: return wired dimensions + neighborhood data (for map/drawer display)
 export async function GET() {
-  const neighborhoods = getAllNeighborhoods();
-  const allN = getAllNeighborhoods();
   const wiredDimensions = getWiredDimensions();
-
   const db = getDb();
-  const weightsRow = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'housing.scoring_weights'")
-    .get() as { value: string } | undefined;
-
-  const weights: ScoringWeights = weightsRow
-    ? JSON.parse(weightsRow.value)
-    : DEFAULT_WEIGHTS;
-
-  const scored = neighborhoods.map((n) => ({
-    ...n,
-    compositeScore: computeNeighborhoodScore(n, weights, allN, wiredDimensions),
-  }));
+  const neighborhoods = db
+    .prepare(`SELECT n.*, COALESCE(m.median_price, 0) as median_price
+              FROM housing_neighborhoods n
+              LEFT JOIN housing_market_stats m ON m.zip = n.zip
+              ORDER BY n.zip`)
+    .all();
 
   return NextResponse.json({
-    neighborhoods: scored,
     wiredDimensions: [...wiredDimensions],
+    neighborhoods,
   });
 }
 
-// POST: recompute all scores with given weights
+// POST: recompute all listing scores with given weights
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const weights: ScoringWeights = body.weights ?? DEFAULT_WEIGHTS;

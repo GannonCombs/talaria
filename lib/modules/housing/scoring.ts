@@ -11,74 +11,84 @@ export interface ScoringWeights {
   price: number;
 }
 
-export interface NeighborhoodData {
-  zip: string;
-  walkScore: number;
-  crimeIndex: number;
-  schoolRating: number;
-  medianIncome: number;
-  commuteJollyvilleMin: number;
-  commuteDowntownMin: number;
-  medianPrice: number;
-}
-
-interface ListingRow {
+// Per-listing raw data for scoring. Each field is nullable —
+// null means that data source hasn't been fetched for this listing yet.
+export interface ListingScoreData {
   id: number;
-  zip: string;
   price: number;
-  days_on_market: number;
-  hoa_monthly: number;
-  tax_annual: number;
+  crime_count: number | null;
+  // Future dimensions:
+  // walk_score_raw: number | null;
+  // school_rating_raw: number | null;
+  // commute_work_min: number | null;
+  // commute_downtown_min: number | null;
+  // median_income: number | null;
 }
 
-// ── Neighborhood Scoring ──
+interface DimensionDef {
+  key: keyof ScoringWeights;
+  getValue: (l: ListingScoreData) => number | null;
+  invert: boolean; // true = lower raw value is better (crime, commute, price)
+}
 
-export function computeNeighborhoodScore(
-  neighborhood: NeighborhoodData,
+const DIMENSIONS: DimensionDef[] = [
+  { key: 'crime', getValue: (l) => l.crime_count, invert: true },
+  // Future:
+  // { key: 'walkability', getValue: (l) => l.walk_score_raw, invert: false },
+  // { key: 'schools', getValue: (l) => l.school_rating_raw, invert: false },
+  // { key: 'commute_work', getValue: (l) => l.commute_work_min, invert: true },
+  // { key: 'commute_downtown', getValue: (l) => l.commute_downtown_min, invert: true },
+  // { key: 'income', getValue: (l) => l.median_income, invert: false },
+  // { key: 'price', getValue: (l) => l.price, invert: true },
+];
+
+// ── Per-listing scoring ─────────────────────────────────────────────────
+
+// Precompute min/max for each dimension across all listings (avoids
+// recomputing inside the per-listing loop).
+function buildMinMax(allListings: ListingScoreData[], wiredDimensions: Set<string>): Map<string, { min: number; max: number }> {
+  const result = new Map<string, { min: number; max: number }>();
+
+  for (const dim of DIMENSIONS) {
+    if (!wiredDimensions.has(dim.key)) continue;
+
+    const values: number[] = [];
+    for (const l of allListings) {
+      const v = dim.getValue(l);
+      if (v !== null) values.push(v);
+    }
+
+    if (values.length === 0) continue;
+    result.set(dim.key, {
+      min: Math.min(...values),
+      max: Math.max(...values),
+    });
+  }
+
+  return result;
+}
+
+export function computeListingScore(
+  listing: ListingScoreData,
   weights: ScoringWeights,
-  allNeighborhoods: NeighborhoodData[],
-  wiredDimensions?: Set<string>,
+  wiredDimensions: Set<string>,
+  minMax: Map<string, { min: number; max: number }>,
 ): number {
-  if (allNeighborhoods.length === 0) return 0;
-
-  const dimensions: { key: keyof ScoringWeights; value: number; invert: boolean }[] = [
-    { key: 'crime', value: neighborhood.crimeIndex, invert: false },
-    { key: 'schools', value: neighborhood.schoolRating, invert: false },
-    { key: 'commute_work', value: neighborhood.commuteJollyvilleMin, invert: true },
-    { key: 'commute_downtown', value: neighborhood.commuteDowntownMin, invert: true },
-    { key: 'walkability', value: neighborhood.walkScore, invert: false },
-    { key: 'income', value: neighborhood.medianIncome, invert: false },
-    { key: 'price', value: neighborhood.medianPrice, invert: true },
-  ];
-
   let weightedSum = 0;
   let totalWeight = 0;
 
-  for (const dim of dimensions) {
-    // If wiredDimensions is provided, skip dimensions that aren't wired
-    // (their data is seed/placeholder and shouldn't affect the score)
-    if (wiredDimensions && !wiredDimensions.has(dim.key)) continue;
-
+  for (const dim of DIMENSIONS) {
+    if (!wiredDimensions.has(dim.key)) continue;
+    const value = dim.getValue(listing);
+    if (value === null) continue;
     const weight = weights[dim.key];
     if (weight === 0) continue;
 
-    const allValues = allNeighborhoods.map((n) => {
-      switch (dim.key) {
-        case 'crime': return n.crimeIndex;
-        case 'schools': return n.schoolRating;
-        case 'commute_work': return n.commuteJollyvilleMin;
-        case 'commute_downtown': return n.commuteDowntownMin;
-        case 'walkability': return n.walkScore;
-        case 'income': return n.medianIncome;
-        case 'price': return n.medianPrice;
-      }
-    });
+    const mm = minMax.get(dim.key);
+    if (!mm) continue;
 
-    const min = Math.min(...allValues);
-    const max = Math.max(...allValues);
-    const range = max - min;
-
-    let normalized = range === 0 ? 0.5 : (dim.value - min) / range;
+    const range = mm.max - mm.min;
+    let normalized = range === 0 ? 0.5 : (value - mm.min) / range;
     if (dim.invert) normalized = 1 - normalized;
 
     weightedSum += normalized * weight;
@@ -89,95 +99,19 @@ export function computeNeighborhoodScore(
   return Math.round((weightedSum / totalWeight) * 100);
 }
 
-// ── Deal Score ──
+// ── Wired dimensions tracking ───────────────────────────────────────────
 
-export function computeDealScore(params: {
-  neighborhoodScore: number;
-  listingPrice: number;
-  zipMedianPrice: number;
-  daysOnMarket: number;
-  zipMedianDom: number;
-  userBudget: number;
-}): number {
-  const {
-    neighborhoodScore,
-    listingPrice,
-    zipMedianPrice,
-    daysOnMarket,
-    zipMedianDom,
-    userBudget,
-  } = params;
-
-  // 1. Neighborhood fit (40%): direct from composite score
-  const neighborhoodFit = neighborhoodScore / 100;
-
-  // 2. Price value (30%): how far below zip median (capped at 0-1)
-  const priceRatio = zipMedianPrice > 0 ? listingPrice / zipMedianPrice : 1;
-  const priceValue = Math.max(0, Math.min(1, 2 - priceRatio));
-
-  // 3. Market timing (15%): longer DOM = more negotiable
-  const domRatio = zipMedianDom > 0 ? daysOnMarket / zipMedianDom : 1;
-  const marketTiming = Math.min(1, domRatio);
-
-  // 4. Budget fit (15%): how far below user's max budget
-  const budgetRatio = userBudget > 0 ? listingPrice / userBudget : 1;
-  const budgetFit = Math.max(0, Math.min(1, 1.5 - budgetRatio));
-
-  const score =
-    neighborhoodFit * 0.4 +
-    priceValue * 0.3 +
-    marketTiming * 0.15 +
-    budgetFit * 0.15;
-
-  return Math.round(score * 100);
-}
-
-// ── Batch compute and store ──
-
-export function getAllNeighborhoods(): NeighborhoodData[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT n.*, COALESCE(m.median_price, 0) as median_price
-       FROM housing_neighborhoods n
-       LEFT JOIN housing_market_stats m ON m.zip = n.zip
-       ORDER BY n.zip`
-    )
-    .all() as Record<string, unknown>[];
-
-  return rows.map((r) => ({
-    zip: r.zip as string,
-    walkScore: (r.walk_score as number) ?? 0,
-    crimeIndex: (r.crime_index as number) ?? 0,
-    schoolRating: (r.school_rating as number) ?? 0,
-    medianIncome: (r.median_income as number) ?? 0,
-    commuteJollyvilleMin: (r.commute_jollyville_min as number) ?? 0,
-    commuteDowntownMin: (r.commute_downtown_min as number) ?? 0,
-    medianPrice: (r.median_price as number) ?? 0,
-  }));
-}
-
-// Detect which scoring dimensions have real (non-seed) data.
-// A dimension is "wired" if its data in housing_neighborhoods was
-// fetched from a real source (indicated by a data_sources JSON column,
-// or by checking if values differ from the hardcoded seed defaults).
 export function getWiredDimensions(): Set<string> {
   const db = getDb();
   const wired = new Set<string>();
-
-  // Check the data_sources metadata stored per-zip
   try {
-    const rows = db
+    const row = db
       .prepare("SELECT value FROM user_preferences WHERE key = 'housing.wired_dimensions'")
       .get() as { value: string } | undefined;
-    if (rows?.value) {
-      const dims = JSON.parse(rows.value) as string[];
-      for (const d of dims) wired.add(d);
+    if (row?.value) {
+      for (const d of JSON.parse(row.value) as string[]) wired.add(d);
     }
-  } catch {
-    // No wired dimensions yet
-  }
-
+  } catch {}
   return wired;
 }
 
@@ -190,73 +124,51 @@ export function setWiredDimension(dimension: string): void {
   ).run(JSON.stringify([...current]));
 }
 
+// ── Batch compute and store ─────────────────────────────────────────────
+
 export function computeAllScores(weights: ScoringWeights, userBudget: number, currentRate: number): {
-  neighborhoods: number;
   listings: number;
 } {
   const db = getDb();
-  const allNeighborhoods = getAllNeighborhoods();
   const wiredDimensions = getWiredDimensions();
 
-  if (allNeighborhoods.length === 0) return { neighborhoods: 0, listings: 0 };
+  // Load all listings with their raw score data
+  const rows = db
+    .prepare('SELECT id, price, crime_count, hoa_monthly, tax_annual FROM housing_listings')
+    .all() as Array<{ id: number; price: number; crime_count: number | null; hoa_monthly: number; tax_annual: number }>;
 
-  // Compute neighborhood scores (only wired dimensions contribute)
-  const neighborhoodScores = new Map<string, number>();
-  const updateNeighborhood = db.prepare(
-    'UPDATE housing_neighborhoods SET composite_score = ? WHERE zip = ?'
-  );
+  if (rows.length === 0) return { listings: 0 };
 
-  const updateNeighborhoods = db.transaction(() => {
-    for (const n of allNeighborhoods) {
-      const score = computeNeighborhoodScore(n, weights, allNeighborhoods, wiredDimensions);
-      neighborhoodScores.set(n.zip, score);
-      updateNeighborhood.run(score, n.zip);
-    }
-  });
-  updateNeighborhoods();
+  const scoreData: ListingScoreData[] = rows.map((r) => ({
+    id: r.id,
+    price: r.price,
+    crime_count: r.crime_count,
+  }));
 
-  // Compute deal scores for listings
-  const listings = db
-    .prepare('SELECT id, zip, price, days_on_market, hoa_monthly, tax_annual FROM housing_listings')
-    .all() as ListingRow[];
-
-  const marketStats = db
-    .prepare('SELECT zip, median_price, median_dom FROM housing_market_stats')
-    .all() as { zip: string; median_price: number; median_dom: number }[];
-
-  const statsMap = new Map(marketStats.map((s) => [s.zip, s]));
+  const minMax = buildMinMax(scoreData, wiredDimensions);
 
   const updateListing = db.prepare(
     'UPDATE housing_listings SET deal_score = ?, monthly_cost = ? WHERE id = ?'
   );
 
-  const updateListings = db.transaction(() => {
-    for (const listing of listings) {
-      const nScore = neighborhoodScores.get(listing.zip) ?? 50;
-      const stats = statsMap.get(listing.zip);
-
-      const dealScore = computeDealScore({
-        neighborhoodScore: nScore,
-        listingPrice: listing.price,
-        zipMedianPrice: stats?.median_price ?? listing.price,
-        daysOnMarket: listing.days_on_market,
-        zipMedianDom: stats?.median_dom ?? 30,
-        userBudget,
-      });
+  const updateAll = db.transaction(() => {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const score = computeListingScore(scoreData[i], weights, wiredDimensions, minMax);
 
       const mortgage = calculateMortgage({
-        homePrice: listing.price,
+        homePrice: row.price,
         downPaymentPct: 20,
         interestRate: currentRate,
         loanTermYears: 30,
-        annualPropertyTax: listing.tax_annual,
-        monthlyHoa: listing.hoa_monthly,
+        annualPropertyTax: row.tax_annual,
+        monthlyHoa: row.hoa_monthly,
       });
 
-      updateListing.run(dealScore, mortgage.total_monthly, listing.id);
+      updateListing.run(score, mortgage.total_monthly, row.id);
     }
   });
-  updateListings();
+  updateAll();
 
-  return { neighborhoods: allNeighborhoods.length, listings: listings.length };
+  return { listings: rows.length };
 }

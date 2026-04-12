@@ -714,10 +714,10 @@ export default function LeftPanel({
             pending edits, so it visually reflects whether there's work to do. */}
         <button
           onClick={commitFilters}
-          disabled={!filtersDirty}
+
           className="w-full h-9 text-xs font-bold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-on-primary disabled:border-outline disabled:text-on-surface-variant disabled:hover:bg-transparent disabled:hover:text-on-surface-variant disabled:cursor-not-allowed"
         >
-          {filtersDirty ? 'Apply Filters' : 'Filters Applied'}
+          {'Apply Filters'}
         </button>
       </div>
 

@@ -39,6 +39,7 @@ interface RightPanelProps {
   prediction: FedPrediction | null;
   topListings: TopListing[];
   onListingClick?: (id: number) => void;
+  onListingHover?: (id: number | null) => void;
 }
 
 const TERM_LABELS: Record<string, string> = {
@@ -55,6 +56,7 @@ export default function RightPanel({
   prediction,
   topListings,
   onListingClick,
+  onListingHover,
 }: RightPanelProps) {
   const [priceHistory, setPriceHistory] = useState<{ date: string; value: number }[]>([]);
   const [pmmsHistory, setPmmsHistory] = useState<{ date: string; value: number }[]>([]);
@@ -270,6 +272,8 @@ export default function RightPanel({
               <button
                 key={listing.id}
                 onClick={() => onListingClick?.(listing.id)}
+                onMouseEnter={() => onListingHover?.(listing.id)}
+                onMouseLeave={() => onListingHover?.(null)}
                 className="w-full p-4 border border-outline bg-surface-container-lowest hover:border-primary text-left"
               >
                 <div className="flex justify-between items-start">
@@ -282,7 +286,7 @@ export default function RightPanel({
                     </div>
                   </div>
                   {listing.dealScore !== null && (
-                    <span className="font-mono text-xs text-tertiary-container font-bold shrink-0 ml-2">
+                    <span className="font-mono text-xs text-tertiary font-bold shrink-0 ml-2">
                       {listing.dealScore}
                     </span>
                   )}
