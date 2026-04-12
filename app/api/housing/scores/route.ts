@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { computeAllScores, getAllNeighborhoods, computeNeighborhoodScore, type ScoringWeights } from '@/lib/modules/housing/scoring';
+import { computeAllScores, getAllNeighborhoods, computeNeighborhoodScore, getWiredDimensions, type ScoringWeights } from '@/lib/modules/housing/scoring';
 import { getDb } from '@/lib/db';
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
@@ -12,10 +12,11 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   price: 8,
 };
 
-// GET: return current neighborhood scores
+// GET: return current neighborhood scores + wired dimensions
 export async function GET() {
   const neighborhoods = getAllNeighborhoods();
   const allN = getAllNeighborhoods();
+  const wiredDimensions = getWiredDimensions();
 
   const db = getDb();
   const weightsRow = db
@@ -28,10 +29,13 @@ export async function GET() {
 
   const scored = neighborhoods.map((n) => ({
     ...n,
-    compositeScore: computeNeighborhoodScore(n, weights, allN),
+    compositeScore: computeNeighborhoodScore(n, weights, allN, wiredDimensions),
   }));
 
-  return NextResponse.json(scored);
+  return NextResponse.json({
+    neighborhoods: scored,
+    wiredDimensions: [...wiredDimensions],
+  });
 }
 
 // POST: recompute all scores with given weights
@@ -42,5 +46,6 @@ export async function POST(request: NextRequest) {
   const currentRate = body.currentRate ?? 5.98;
 
   const result = computeAllScores(weights, budget, currentRate);
-  return NextResponse.json({ ok: true, computed: result });
+  const wiredDimensions = getWiredDimensions();
+  return NextResponse.json({ ok: true, computed: result, wiredDimensions: [...wiredDimensions] });
 }

@@ -108,6 +108,7 @@ const TIER_TO_SCORE: Record<string, number> = {
 
 export default function HousingPage() {
   const [neighborhoods, setNeighborhoods] = useState<NeighborhoodScore[]>([]);
+  const [wiredDimensions, setWiredDimensions] = useState<string[]>([]);
   const [listings, setListings] = useState<ListingData[]>([]);
   const [weights, setWeights] = useState<ScoringWeights>(DEFAULT_WEIGHTS);
   const [filters, setFilters] = useState<Filters>({
@@ -382,13 +383,35 @@ export default function HousingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [city, stateCode]);
 
-  // Static-ish data: scores + predictions. Loaded once on mount.
-  // Doesn't need to re-run when filters change.
+  // Static-ish data: scores, predictions, crime. Loaded once on mount.
+  // Free data sources (crime, predictions) auto-fetch on every load.
   useEffect(() => {
-    fetch('/api/housing/scores')
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => { if (data) setNeighborhoods(data); })
-      .catch(() => {});
+    // Fetch crime data (free), recompute all scores, then load results.
+    // The score recompute uses only wired dimensions — so with only crime
+    // wired, scores are 100% based on crime safety.
+    fetch('/api/housing/crime', { method: 'POST' })
+      .catch(() => {})
+      .finally(() => {
+        // Recompute scores with current weights (wiredDimensions applied server-side)
+        fetch('/api/housing/scores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ weights }),
+        })
+          .catch(() => {})
+          .finally(() => {
+            // Now load the freshly computed scores + wired dimensions
+            fetch('/api/housing/scores')
+              .then((r) => r.ok ? r.json() : null)
+              .then((data) => {
+                if (data?.neighborhoods) setNeighborhoods(data.neighborhoods);
+                if (data?.wiredDimensions) setWiredDimensions(data.wiredDimensions);
+              })
+              .catch(() => {});
+            // Reload listings to pick up new deal_score values
+            loadListings();
+          });
+      });
     fetch('/api/housing/predictions')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => { if (data) setPrediction(data); })
@@ -415,12 +438,9 @@ export default function HousingPage() {
 
   // Rudimentary "deal" ranking: lowest price-per-square-foot wins.
   // 100% weighted on $/sqft because it's the only signal we have wired
-  // up right now (RentCast sale-listings provides price + sqft directly).
-  // Replace with the full neighborhood-weighted dealScore once that path
-  // is wired.
   const topListings = [...listings]
-    .filter((l) => l.sqft != null && l.sqft > 0 && l.price > 0)
-    .sort((a, b) => a.price / a.sqft - b.price / b.sqft)
+    .filter((l) => l.price > 0)
+    .sort((a, b) => (b.dealScore ?? 0) - (a.dealScore ?? 0))
     .slice(0, 10);
 
   return (
@@ -485,6 +505,7 @@ export default function HousingPage() {
                 onIsochroneSubmit={triggerIsochroneFetch}
                 priceTrendMonths={priceTrendMonths}
                 onPriceTrendMonthsChange={setPriceTrendMonths}
+                wiredDimensions={wiredDimensions}
               />
             </div>
           )}

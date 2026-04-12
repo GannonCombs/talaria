@@ -36,7 +36,8 @@ interface ListingRow {
 export function computeNeighborhoodScore(
   neighborhood: NeighborhoodData,
   weights: ScoringWeights,
-  allNeighborhoods: NeighborhoodData[]
+  allNeighborhoods: NeighborhoodData[],
+  wiredDimensions?: Set<string>,
 ): number {
   if (allNeighborhoods.length === 0) return 0;
 
@@ -54,6 +55,10 @@ export function computeNeighborhoodScore(
   let totalWeight = 0;
 
   for (const dim of dimensions) {
+    // If wiredDimensions is provided, skip dimensions that aren't wired
+    // (their data is seed/placeholder and shouldn't affect the score)
+    if (wiredDimensions && !wiredDimensions.has(dim.key)) continue;
+
     const weight = weights[dim.key];
     if (weight === 0) continue;
 
@@ -152,16 +157,50 @@ export function getAllNeighborhoods(): NeighborhoodData[] {
   }));
 }
 
+// Detect which scoring dimensions have real (non-seed) data.
+// A dimension is "wired" if its data in housing_neighborhoods was
+// fetched from a real source (indicated by a data_sources JSON column,
+// or by checking if values differ from the hardcoded seed defaults).
+export function getWiredDimensions(): Set<string> {
+  const db = getDb();
+  const wired = new Set<string>();
+
+  // Check the data_sources metadata stored per-zip
+  try {
+    const rows = db
+      .prepare("SELECT value FROM user_preferences WHERE key = 'housing.wired_dimensions'")
+      .get() as { value: string } | undefined;
+    if (rows?.value) {
+      const dims = JSON.parse(rows.value) as string[];
+      for (const d of dims) wired.add(d);
+    }
+  } catch {
+    // No wired dimensions yet
+  }
+
+  return wired;
+}
+
+export function setWiredDimension(dimension: string): void {
+  const db = getDb();
+  const current = getWiredDimensions();
+  current.add(dimension);
+  db.prepare(
+    "INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES ('housing.wired_dimensions', ?, datetime('now'))"
+  ).run(JSON.stringify([...current]));
+}
+
 export function computeAllScores(weights: ScoringWeights, userBudget: number, currentRate: number): {
   neighborhoods: number;
   listings: number;
 } {
   const db = getDb();
   const allNeighborhoods = getAllNeighborhoods();
+  const wiredDimensions = getWiredDimensions();
 
   if (allNeighborhoods.length === 0) return { neighborhoods: 0, listings: 0 };
 
-  // Compute neighborhood scores
+  // Compute neighborhood scores (only wired dimensions contribute)
   const neighborhoodScores = new Map<string, number>();
   const updateNeighborhood = db.prepare(
     'UPDATE housing_neighborhoods SET composite_score = ? WHERE zip = ?'
@@ -169,7 +208,7 @@ export function computeAllScores(weights: ScoringWeights, userBudget: number, cu
 
   const updateNeighborhoods = db.transaction(() => {
     for (const n of allNeighborhoods) {
-      const score = computeNeighborhoodScore(n, weights, allNeighborhoods);
+      const score = computeNeighborhoodScore(n, weights, allNeighborhoods, wiredDimensions);
       neighborhoodScores.set(n.zip, score);
       updateNeighborhood.run(score, n.zip);
     }

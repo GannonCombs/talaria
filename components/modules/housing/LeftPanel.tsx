@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Bookmark, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Bookmark, Check, ChevronRight, MapPin, SlidersHorizontal, DollarSign, Plus, Trash2, TrendingUp } from 'lucide-react';
 import type { ScoringWeights } from '@/lib/modules/housing/scoring';
 import { formatRelativeFromNow } from '@/lib/time';
 
@@ -75,6 +75,7 @@ interface LeftPanelProps {
   // from the same source. Visibility toggle stays in the map controls.
   priceTrendMonths: number;
   onPriceTrendMonthsChange: (months: number) => void;
+  wiredDimensions?: string[];
 }
 
 type SectionView = 'menu' | 'isochrones' | 'scoring' | 'budget' | 'priceTrends';
@@ -91,15 +92,20 @@ function WeightSlider({
   label,
   value,
   onChange,
+  wired,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
+  wired?: boolean;
 }) {
   return (
     <div className="py-2">
       <div className="flex justify-between mb-1">
-        <span className="text-xs text-on-surface-variant">{label}</span>
+        <span className="text-xs text-on-surface-variant flex items-center gap-1">
+          {wired && <Check size={12} className="text-primary shrink-0" />}
+          {label}
+        </span>
         <span className="font-mono text-xs text-on-surface">{value}</span>
       </div>
       <input
@@ -135,7 +141,9 @@ export default function LeftPanel({
   onIsochroneSubmit,
   priceTrendMonths,
   onPriceTrendMonthsChange,
+  wiredDimensions = [],
 }: LeftPanelProps) {
+  const wiredSet = new Set(wiredDimensions);
   const [section, setSection] = useState<SectionView>('menu');
   const [moreOptions, setMoreOptions] = useState(false);
 
@@ -311,16 +319,16 @@ export default function LeftPanel({
           Adjust weights to prioritize what matters to you. Higher = more important.
         </p>
         <div className="space-y-1">
-          <WeightSlider label="Safety / Crime" value={weights.crime} onChange={(v) => updateWeight('crime', v)} />
-          <WeightSlider label="Schools" value={weights.schools} onChange={(v) => updateWeight('schools', v)} />
-          <WeightSlider label="Commute: Work" value={weights.commute_work} onChange={(v) => updateWeight('commute_work', v)} />
-          <WeightSlider label="Commute: Social" value={weights.commute_downtown} onChange={(v) => updateWeight('commute_downtown', v)} />
-          <WeightSlider label="Walkability" value={weights.walkability} onChange={(v) => updateWeight('walkability', v)} />
-          <WeightSlider label="Price Value" value={weights.price} onChange={(v) => updateWeight('price', v)} />
-          <WeightSlider label="AVM (Underpriced)" value={weights.income} onChange={(v) => updateWeight('income', v)} />
+          <WeightSlider label="Safety / Crime" value={weights.crime} onChange={(v) => updateWeight('crime', v)} wired={wiredSet.has('crime')} />
+          <WeightSlider label="Schools" value={weights.schools} onChange={(v) => updateWeight('schools', v)} wired={wiredSet.has('schools')} />
+          <WeightSlider label="Commute: Work" value={weights.commute_work} onChange={(v) => updateWeight('commute_work', v)} wired={wiredSet.has('commute_work')} />
+          <WeightSlider label="Commute: Social" value={weights.commute_downtown} onChange={(v) => updateWeight('commute_downtown', v)} wired={wiredSet.has('commute_downtown')} />
+          <WeightSlider label="Walkability" value={weights.walkability} onChange={(v) => updateWeight('walkability', v)} wired={wiredSet.has('walkability')} />
+          <WeightSlider label="Price Value" value={weights.price} onChange={(v) => updateWeight('price', v)} wired={wiredSet.has('price')} />
+          <WeightSlider label="AVM (Underpriced)" value={weights.income} onChange={(v) => updateWeight('income', v)} wired={wiredSet.has('income')} />
         </div>
         <div className="text-[10px] text-on-surface-variant mt-4">
-          AVM compares listing price to estimated market value. Flood risk is factored in automatically when the flood zone overlay is enabled.
+          Dimensions with a checkmark have real data. Others use placeholder values and are excluded from scoring until wired up.
         </div>
       </div>
     );
