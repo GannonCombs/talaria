@@ -1,44 +1,23 @@
 import { getDb } from '@/lib/db';
 import { logMppTransaction } from '@/lib/mpp';
-import { spawnSync } from 'child_process';
-import path from 'path';
-
-// Path to the installed agentcash CLI bin. Computed from process.cwd() at
-// runtime — Turbopack rewrites `require.resolve` for externals into a fake
-// `[externals]` placeholder string, so we deliberately avoid it.
-const agentcashCli = path.join(
-  process.cwd(),
-  'node_modules',
-  'agentcash',
-  'dist',
-  'esm',
-  'index.js'
-);
+import { paidFetch } from '@/lib/mpp-client';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function callRentcast(endpoint: string, body: Record<string, unknown>): any {
-  const result = spawnSync(
-    process.execPath,
-    [
-      agentcashCli,
-      'fetch',
-      `https://rentcast.mpp.paywithlocus.com${endpoint}`,
-      '-m', 'POST',
-      '-b', JSON.stringify(body),
-      '--format', 'json',
-    ],
-    { timeout: 120000, shell: false, encoding: 'utf8' }
+async function callRentcast(endpoint: string, body: Record<string, unknown>): Promise<any> {
+  const res = await paidFetch(
+    `https://rentcast.mpp.paywithlocus.com${endpoint}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
   );
 
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`agentcash exited ${result.status}: ${result.stderr || result.stdout}`);
+  if (!res.ok) {
+    throw new Error(`RentCast MPP ${res.status}: ${await res.text()}`);
   }
-  const parsed = JSON.parse(result.stdout);
-  if (parsed.success === false) {
-    throw new Error(`agentcash error: ${JSON.stringify(parsed.error)}`);
-  }
-  return parsed.data?.data ?? parsed.data ?? parsed;
+
+  return res.json();
 }
 
 export interface MarketStats {
@@ -244,14 +223,16 @@ export async function refreshListingsForCity(
     let offset = 0;
 
     while (pageCount < maxPages) {
-      const data = callRentcast('/rentcast/sale-listings', {
+      const data = await callRentcast('/rentcast/sale-listings', {
         city,
         state,
         status: 'Active',
         limit: PAGE_LIMIT,
         offset,
       });
-      const records: RentcastListing[] = Array.isArray(data) ? data : [];
+      // paidFetch returns the raw API response; unwrap if nested under a `data` key
+      const unwrapped = Array.isArray(data) ? data : (data?.data ?? data);
+      const records: RentcastListing[] = Array.isArray(unwrapped) ? unwrapped : [];
       pageCount++;
 
       const inserted = upsertOnePage(records, city, state);

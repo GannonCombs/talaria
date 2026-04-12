@@ -484,7 +484,7 @@ export default function HousingPage() {
       {/* Three-column layout */}
       <div className={`flex-1 grid ${leftCollapsed ? 'grid-cols-[auto_1fr_320px]' : 'grid-cols-[260px_1fr_320px]'} overflow-hidden`}>
         {/* Left Panel */}
-        <div className="relative border-r border-outline">
+        <div className="relative border-r border-outline overflow-hidden">
           {leftCollapsed ? (
             <div className="h-full flex items-start pt-4 px-1 bg-background">
               <button
@@ -495,7 +495,7 @@ export default function HousingPage() {
               </button>
             </div>
           ) : (
-            <div className="h-full relative">
+            <div className="h-full relative overflow-hidden">
               <button
                 onClick={() => setLeftCollapsed(true)}
                 className="absolute top-3 right-3 z-10 p-1 text-on-surface-variant hover:text-on-surface"
