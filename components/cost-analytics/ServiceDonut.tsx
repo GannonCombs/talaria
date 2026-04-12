@@ -1,5 +1,6 @@
 'use client';
 
+import SafeChart from '@/components/shared/SafeChart';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 interface ServiceSpend {
@@ -38,7 +39,7 @@ export default function ServiceDonut({ data, totalSpend }: ServiceDonutProps) {
         ) : (
           <>
             {/* Donut */}
-            <div className="relative w-32 h-32 shrink-0">
+            <SafeChart className="relative w-32 h-32 shrink-0">
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <PieChart>
                   <Pie
@@ -65,7 +66,7 @@ export default function ServiceDonut({ data, totalSpend }: ServiceDonutProps) {
                   ${totalSpend.toFixed(2)}
                 </span>
               </div>
-            </div>
+            </SafeChart>
 
             {/* Legend */}
             <div className="flex-1 space-y-2 w-full">

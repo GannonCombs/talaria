@@ -1,5 +1,6 @@
 'use client';
 
+import SafeChart from '@/components/shared/SafeChart';
 import {
   AreaChart,
   Area,
@@ -32,7 +33,7 @@ export default function SpendChart({ data }: SpendChartProps) {
           Daily Spend Performance
         </span>
       </div>
-      <div className="flex-1 p-4">
+      <SafeChart className="flex-1 p-4">
         {data.length === 0 ? (
           <div className="flex items-center justify-center h-full text-on-surface-variant text-sm">
             No spend data yet
@@ -86,7 +87,7 @@ export default function SpendChart({ data }: SpendChartProps) {
             </AreaChart>
           </ResponsiveContainer>
         )}
-      </div>
+      </SafeChart>
     </div>
   );
 }

@@ -13,20 +13,20 @@ export async function fetchFedPredictions(): Promise<FedPrediction> {
   const cached = getCachedPrediction();
   if (cached) return cached;
 
-  // Try Polymarket first, then Kalshi
+  // Try Kalshi first (structured ticker data, more reliable), then Polymarket
   let prediction: FedPrediction | null = null;
 
   try {
-    prediction = await fetchPolymarket();
+    prediction = await fetchKalshi();
   } catch {
-    // Polymarket unavailable
+    // Kalshi unavailable
   }
 
   if (!prediction) {
     try {
-      prediction = await fetchKalshi();
+      prediction = await fetchPolymarket();
     } catch {
-      // Kalshi unavailable
+      // Polymarket unavailable
     }
   }
 
@@ -50,8 +50,10 @@ interface GammaMarket {
 }
 
 async function fetchPolymarket(): Promise<FedPrediction> {
+  // limit=500: the "no change" market is often outside the top 100 by
+  // volume, which caused holdProb to silently stay at 0.
   const res = await fetch(
-    'https://gamma-api.polymarket.com/markets?limit=100&closed=false&order=volume24hr&ascending=false',
+    'https://gamma-api.polymarket.com/markets?limit=500&closed=false&order=volume24hr&ascending=false',
     { signal: AbortSignal.timeout(10000) }
   );
 
@@ -81,7 +83,7 @@ async function fetchPolymarket(): Promise<FedPrediction> {
       meetingDate = market.endDate.split('T')[0];
     }
 
-    if (question.includes('no change')) {
+    if (question.includes('no change') || question.includes('unchanged') || question.includes('hold')) {
       holdProb = yesPrice;
     } else if (question.includes('decrease') && question.includes('50')) {
       cutProb += yesPrice; // 50+ bps cut
@@ -92,46 +94,90 @@ async function fetchPolymarket(): Promise<FedPrediction> {
     }
   }
 
+  // Safety net: derive hold as residual if no explicit hold market was found
+  if (holdProb === 0 && (cutProb > 0 || hikeProb > 0)) {
+    holdProb = Math.max(0, 1 - cutProb - hikeProb);
+  }
+
   return { meetingDate, cutProb, holdProb, hikeProb, source: 'polymarket' };
 }
 
-// ── Kalshi (v2 API) ──
+// ── Kalshi (v2 API, KXFEDDECISION series) ──
+//
+// The KXFEDDECISION series has 5 markets per FOMC meeting with structured
+// ticker suffixes:
+//   -H0  = "Hike by 0bps"  → HOLD
+//   -H25 = "Hike by 25bps" → HIKE (25 bps)
+//   -H26 = "Hike by >25bps" → HIKE (50+ bps)
+//   -C25 = "Cut by 25bps"  → CUT (25 bps)
+//   -C26 = "Cut by >25bps" → CUT (50+ bps)
+//
+// We filter to the nearest meeting (earliest close_time) and parse by
+// ticker suffix rather than question text — much more reliable.
 
 async function fetchKalshi(): Promise<FedPrediction> {
   const res = await fetch(
-    'https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXFED&limit=20&status=open',
+    'https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXFEDDECISION&limit=100&status=open',
     { signal: AbortSignal.timeout(10000) }
   );
 
   if (!res.ok) throw new Error(`Kalshi ${res.status}`);
 
   const data = await res.json();
-  const markets = data.markets ?? [];
+  const markets: Array<{
+    ticker?: string;
+    close_time?: string;
+    last_price_dollars?: number;
+    yes_ask_dollars?: number;
+  }> = data.markets ?? [];
+
+  if (markets.length === 0) throw new Error('No KXFEDDECISION markets');
+
+  // Find the earliest close_time — that's the next FOMC meeting
+  const sorted = [...markets]
+    .filter((m) => m.close_time)
+    .sort((a, b) => a.close_time!.localeCompare(b.close_time!));
+
+  if (sorted.length === 0) throw new Error('No KXFEDDECISION markets with close_time');
+
+  const nextMeetingClose = sorted[0].close_time!.split('T')[0];
+  const meetingDate = nextMeetingClose;
+
+  // Filter to only that meeting's markets
+  const meetingMarkets = sorted.filter(
+    (m) => m.close_time!.startsWith(nextMeetingClose)
+  );
 
   let holdProb = 0;
   let cutProb = 0;
   let hikeProb = 0;
-  let meetingDate = '';
 
-  for (const market of markets) {
-    const title = (market.title ?? market.subtitle ?? '').toLowerCase();
-    const price = market.last_price_dollars ?? market.yes_ask_dollars ?? 0;
+  for (const market of meetingMarkets) {
+    const ticker = market.ticker ?? '';
+    // Kalshi returns prices as strings (e.g., "0.0100") — parseFloat to
+    // avoid string concatenation.
+    const price = parseFloat(String(market.last_price_dollars ?? market.yes_ask_dollars ?? 0));
 
-    if (!meetingDate && market.close_time) {
-      meetingDate = market.close_time.split('T')[0];
-    }
-
-    if (title.includes('no change') || title.includes('unchanged')) {
+    // Use only the three core markets: hold (H0), cut 25bps (C25), hike
+    // 25bps (H25). The >25bps long-tail brackets (C26, H26) add overround
+    // that pushes the sum past 100%. The three main bets track very close
+    // to 100% on their own.
+    if (ticker.endsWith('-H0')) {
       holdProb = price;
-    } else if (title.includes('cut') || title.includes('decrease') || title.includes('lower')) {
-      cutProb += price;
-    } else if (title.includes('hike') || title.includes('increase') || title.includes('raise')) {
+    } else if (ticker.endsWith('-H25')) {
       hikeProb = price;
+    } else if (ticker.endsWith('-C25')) {
+      cutProb = price;
     }
   }
 
   if (holdProb === 0 && cutProb === 0 && hikeProb === 0) {
-    throw new Error('No Fed data parsed from Kalshi');
+    throw new Error('No Fed data parsed from Kalshi KXFEDDECISION');
+  }
+
+  // Safety net: derive hold as residual if the H0 market was missing
+  if (holdProb === 0 && (cutProb > 0 || hikeProb > 0)) {
+    holdProb = Math.max(0, 1 - cutProb - hikeProb);
   }
 
   return { meetingDate, cutProb, holdProb, hikeProb, source: 'kalshi' };

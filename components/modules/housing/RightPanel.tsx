@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import SafeChart from '@/components/shared/SafeChart';
 import {
   AreaChart,
   Area,
@@ -121,7 +122,7 @@ export default function RightPanel({
                 {pmmsHistory[pmmsHistory.length - 1].value.toFixed(2)}%
               </span>
             </div>
-            <div className="h-16">
+            <SafeChart className="h-16">
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <AreaChart data={pmmsHistory}>
                   <defs>
@@ -141,7 +142,7 @@ export default function RightPanel({
                   <Area type="monotone" dataKey="value" stroke="#46f1c5" strokeWidth={1.5} fill="url(#pmmsGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
+            </SafeChart>
             <div className="text-[10px] text-on-surface-variant font-mono mt-1">
               Freddie Mac PMMS · 52wk
             </div>
@@ -224,7 +225,7 @@ export default function RightPanel({
                 );
               })()}
             </div>
-            <div className="h-24">
+            <SafeChart className="h-24">
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <AreaChart data={priceHistory}>
                   <defs>
@@ -244,7 +245,7 @@ export default function RightPanel({
                   <Area type="monotone" dataKey="value" stroke="#f87171" strokeWidth={2} fill="url(#priceGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
+            </SafeChart>
             <div className="text-[10px] text-on-surface-variant font-mono mt-1">
               Austin, TX · Zillow ZHVI
             </div>
