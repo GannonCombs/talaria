@@ -1,4 +1,6 @@
 import { getDb } from '@/lib/db';
+import { Resolver } from 'node:dns/promises';
+import { request as httpsRequest } from 'node:https';
 
 export interface MortgageRate {
   product: string;
@@ -55,20 +57,44 @@ export async function fetchBankrateRates(
   url.searchParams.set('includeEditorial', 'true');
 
   try {
-    const response = await fetch(url.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        Accept: 'application/json',
-        Origin: 'https://www.bankrate.com',
-        Referer: 'https://www.bankrate.com/mortgages/mortgage-rates/',
-      },
-      signal: AbortSignal.timeout(15000),
+    // Resolve via Google DNS to bypass Cisco Umbrella blocking this domain
+    const resolver = new Resolver();
+    resolver.setServers(['8.8.8.8', '8.8.4.4']);
+    const [resolvedIp] = await resolver.resolve4('mortgage-api.bankrate.com');
+
+    const response = await new Promise<{ ok: boolean; status: number; json: () => unknown }>((resolve, reject) => {
+      const req = httpsRequest({
+        hostname: resolvedIp,
+        port: 443,
+        path: url.pathname + url.search,
+        method: 'GET',
+        servername: 'mortgage-api.bankrate.com',
+        headers: {
+          Host: 'mortgage-api.bankrate.com',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          Accept: 'application/json',
+          Origin: 'https://www.bankrate.com',
+          Referer: 'https://www.bankrate.com/mortgages/mortgage-rates/',
+        },
+        timeout: 15000,
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => (body += chunk));
+        res.on('end', () => resolve({
+          ok: res.statusCode! >= 200 && res.statusCode! < 300,
+          status: res.statusCode!,
+          json: () => JSON.parse(body),
+        }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('Bankrate request timeout')); });
+      req.end();
     });
 
     if (!response.ok) throw new Error(`Bankrate API ${response.status}`);
 
-    const data = await response.json();
-    const offers = data.offers as Array<{
+    const data = response.json() as Record<string, unknown>;
+    const offers = (data as { offers: unknown }).offers as Array<{
       advertiser?: { name?: string };
       product?: { term?: string; type?: string };
       rate: number;
