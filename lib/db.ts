@@ -42,23 +42,19 @@ function initializeDatabase(db: Database.Database): void {
   const fromVersion = currentVersion?.version ?? 0;
 
   if (fromVersion < SCHEMA_VERSION) {
-    // Try additive ALTER-based migration first. If we can walk version
-    // by version applying small changes, we preserve cached data (e.g.
-    // the ~$0.33 of Austin RentCast listings). Falls back to a full
-    // drop-and-rebuild if any migration step throws.
-    try {
+    // Run migration + version bump inside a transaction. If the migration
+    // throws (e.g. duplicate column from a partial prior run), the
+    // transaction rolls back — no half-applied schema, no data loss.
+    //
+    // CRITICAL: We never fall back to drop-and-rebuild. If a migration
+    // fails, the app refuses to start. Data loss is not acceptable.
+    const migrate = db.transaction(() => {
       runMigrations(db, fromVersion);
       db.prepare(
         'INSERT OR REPLACE INTO schema_version (version) VALUES (?)'
       ).run(SCHEMA_VERSION);
-    } catch (err) {
-      console.warn(
-        `[db] Additive migration ${fromVersion}→${SCHEMA_VERSION} failed, falling back to drop-and-rebuild:`,
-        err instanceof Error ? err.message : err
-      );
-      resetDatabase(db);
-      buildSchema(db);
-    }
+    });
+    migrate();
   }
 }
 
@@ -70,11 +66,35 @@ function initializeDatabase(db: Database.Database): void {
 // drop-and-rebuild path. New schema versions starting from v7 should
 // add additive migrations here so cached data (especially the ~$0.33
 // of RentCast listings) survives.
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const cols = db.pragma(`table_info(${table})`) as { name: string }[];
+  return cols.some((c) => c.name === column);
+}
+
 function runMigrations(db: Database.Database, fromVersion: number): void {
-  // No-op when fromVersion >= SCHEMA_VERSION. Future migrations go
-  // here as `if (fromVersion < N) { ... }` blocks in ascending order.
-  void db;
-  void fromVersion;
+  if (fromVersion < 7) {
+    // Add status column for atomic transaction reservation (pending/completed/failed).
+    // Idempotent — skips if column already exists (e.g. partial prior migration).
+    if (!hasColumn(db, 'mpp_transactions', 'status')) {
+      db.exec(`ALTER TABLE mpp_transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'`);
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_status ON mpp_transactions(status)`);
+
+    // Seed new security preferences (INSERT OR IGNORE preserves existing values)
+    const seedPrefs: [string, string][] = [
+      ['security.approval_mode', 'threshold'],
+      ['security.max_transaction', '1.00'],
+      ['security.auto_approve_under', '0.05'],
+      ['security.biometric_above', '0.25'],
+      ['security.daily_txn_count', '100'],
+    ];
+    const insert = db.prepare(
+      'INSERT OR IGNORE INTO user_preferences (key, value) VALUES (?, ?)'
+    );
+    for (const [key, value] of seedPrefs) {
+      insert.run(key, value);
+    }
+  }
 }
 
 function buildSchema(db: Database.Database): void {
@@ -141,7 +161,17 @@ function resetDatabase(db: Database.Database): void {
   (db as Database.Database & { _walletKeys?: typeof walletKeys })._walletKeys = walletKeys;
 }
 
-export function resetDb(): void {
+// Public reset requires biometric confirmation. This drops ALL tables
+// and rebuilds from scratch — all cached data (listings, transactions,
+// preferences) will be lost. Touch ID / system credential is mandatory.
+export async function resetDb(): Promise<void> {
+  const { ApprovalManager } = await import('./security/approval');
+  const confirmed = await ApprovalManager.requestDestructiveConfirmation(
+    'Reset Talaria database'
+  );
+  if (!confirmed) {
+    throw new Error('Database reset denied — biometric confirmation required');
+  }
   const db = getDb();
   resetDatabase(db);
   buildSchema(db);

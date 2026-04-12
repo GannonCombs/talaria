@@ -11,8 +11,11 @@
 import { Mppx, tempo } from 'mppx/client';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getDb } from './db';
-import { logMppTransaction } from './mpp';
+import { logMppTransaction, reserveTransaction, completeTransaction, failTransaction } from './mpp';
 import { KeychainManager } from './security/keychain';
+import { SpendLimits } from './security/limits';
+import { ApprovalManager } from './security/approval';
+import { estimateCost } from './security/costs';
 
 // ── DIAGNOSTIC: per-fetch timing wrapper ─────────────────────────────────
 //
@@ -97,18 +100,87 @@ function getMppxClient() {
   return _clientPromise;
 }
 
-// Real Response object — caller chooses how to read the body. Use this
-// for endpoints that return binary (images, audio, video) or for any
-// case where you want full control over the response.
-//
-// Throws if the wallet file is missing or unreadable, if mppx fails
-// to negotiate payment, or if the server returns a non-OK status.
+// ── Error types ─────────────────────────────────────────────────────────
+
+export class SpendLimitError extends Error {
+  constructor(public errors: string[]) {
+    super(`Spend limit exceeded: ${errors.join('; ')}`);
+    this.name = 'SpendLimitError';
+  }
+}
+
+export class ApprovalDeniedError extends Error {
+  constructor(service?: string) {
+    super(`Payment approval denied${service ? ` for ${service}` : ''}`);
+    this.name = 'ApprovalDeniedError';
+  }
+}
+
+// ── Paid fetch with approval gate ───────────────────────────────────────
+
+export interface PaidFetchOptions {
+  service?: string;       // 'RentCast', 'Mapbox', etc.
+  module?: string;        // 'housing', 'portfolio', etc.
+  endpoint?: string;      // '/rentcast/sale-listings', etc.
+  estimatedCost?: number; // Override cost estimate (USD)
+}
+
+function extractServiceName(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    // 'rentcast.mpp.paywithlocus.com' → 'RentCast'
+    const first = host.split('.')[0];
+    return first.charAt(0).toUpperCase() + first.slice(1);
+  } catch {
+    return 'Unknown';
+  }
+}
+
+// Approval-gated paid fetch. Validates spending limits, requests
+// biometric approval (if configured), reserves a pending transaction,
+// then executes the MPP payment. On failure, marks the transaction failed.
 export async function paidFetch(
   url: string,
-  init?: RequestInit
+  init?: RequestInit,
+  opts?: PaidFetchOptions,
 ): Promise<Response> {
-  const client = await getMppxClient();
-  return client.fetch(url, init);
+  const cost = opts?.estimatedCost ?? estimateCost(url);
+
+  // 1. Validate against hard limits
+  const validation = SpendLimits.validateTransaction(cost);
+  if (!validation.valid) {
+    throw new SpendLimitError(validation.errors);
+  }
+
+  // 2. Request approval (may trigger Touch ID)
+  const approval = await ApprovalManager.requestApproval({
+    amount: cost,
+    merchantName: opts?.service ?? extractServiceName(url),
+    description: opts?.endpoint ?? url,
+    rail: 'stablecoin',
+  });
+  if (!approval.approved) {
+    throw new ApprovalDeniedError(opts?.service ?? extractServiceName(url));
+  }
+
+  // 3. Reserve transaction (pending — counts toward daily limits)
+  const txId = reserveTransaction({
+    service: opts?.service ?? extractServiceName(url),
+    module: opts?.module ?? 'unknown',
+    endpoint: opts?.endpoint,
+    estimatedCostUsd: cost,
+  });
+
+  // 4. Execute payment
+  try {
+    const client = await getMppxClient();
+    const res = await client.fetch(url, init);
+    completeTransaction(txId, cost);
+    return res;
+  } catch (e) {
+    failTransaction(txId);
+    throw e;
+  }
 }
 
 // ── Cache (legacy JSON-call helper used by mapbox.ts) ──

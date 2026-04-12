@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -10,7 +10,8 @@ export const CREATE_TABLES_SQL = `
     rail TEXT NOT NULL DEFAULT 'tempo',
     cost_usd REAL NOT NULL,
     request_hash TEXT,
-    metadata TEXT
+    metadata TEXT,
+    status TEXT NOT NULL DEFAULT 'completed'
   );
 
   CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON mpp_transactions(timestamp);
@@ -41,8 +42,13 @@ export const DEFAULT_PREFERENCES: Record<string, string> = {
   name: 'Gannon Combs',
   city: 'Austin',
   state: 'TX',
-  daily_spend_limit: '50',
+  daily_spend_limit: '5',
   low_balance_alert: '5.00',
+  'security.approval_mode': 'always-biometric',
+  'security.max_transaction': '1.00',
+  'security.auto_approve_under': '0.05',
+  'security.biometric_above': '0.25',
+  'security.daily_txn_count': '100',
   // Housing module
   'housing.budget': '550000',
   'housing.down_payment_pct': '20',

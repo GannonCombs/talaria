@@ -56,10 +56,57 @@ export function getTodaySpend(): number {
     .prepare(
       `SELECT COALESCE(SUM(cost_usd), 0) as total
        FROM mpp_transactions
-       WHERE date(timestamp, 'localtime') = date('now', 'localtime')`
+       WHERE date(timestamp, 'localtime') = date('now', 'localtime')
+         AND status IN ('pending', 'completed')`
     )
     .get() as { total: number };
   return row.total;
+}
+
+// ── Transaction reservation (for spending authorization) ────────────────
+
+// Reserve a transaction slot BEFORE payment. Returns the row ID.
+// The pending row counts toward daily limits immediately.
+export function reserveTransaction(params: {
+  service: string;
+  module: string;
+  endpoint?: string;
+  rail?: 'tempo' | 'card';
+  estimatedCostUsd: number;
+  metadata?: Record<string, unknown>;
+}): number {
+  const db = getDb();
+  const result = db.prepare(
+    `INSERT INTO mpp_transactions (service, module, endpoint, rail, cost_usd, status, metadata)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?)`
+  ).run(
+    params.service, params.module, params.endpoint ?? null,
+    params.rail ?? 'tempo', params.estimatedCostUsd,
+    params.metadata ? JSON.stringify(params.metadata) : null
+  );
+  return Number(result.lastInsertRowid);
+}
+
+// Mark a reserved transaction as completed (with optional actual cost update).
+export function completeTransaction(id: number, actualCostUsd?: number): void {
+  const db = getDb();
+  if (actualCostUsd !== undefined) {
+    db.prepare(
+      `UPDATE mpp_transactions SET status = 'completed', cost_usd = ? WHERE id = ?`
+    ).run(actualCostUsd, id);
+  } else {
+    db.prepare(
+      `UPDATE mpp_transactions SET status = 'completed' WHERE id = ?`
+    ).run(id);
+  }
+}
+
+// Mark a reserved transaction as failed (user denied, payment error, etc.).
+export function failTransaction(id: number): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE mpp_transactions SET status = 'failed' WHERE id = ?`
+  ).run(id);
 }
 
 export function getMonthSpend(): number {

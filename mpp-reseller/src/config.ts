@@ -30,6 +30,7 @@ function optional(name: string, fallback: string): string {
 
 function buildConfig() {
   const googleMapsApiKey = required('GOOGLE_MAPS_API_KEY');
+  const finnhubApiKey = optional('FINNHUB_API_KEY', '');
   const mppSecretKey = required('MPP_SECRET_KEY');
   const port = parseInt(optional('RESELLER_PORT', '8787'), 10);
   const logDir = optional('LOG_DIR', './logs');
@@ -40,6 +41,7 @@ function buildConfig() {
 
   return Object.freeze({
     googleMapsApiKey,
+    finnhubApiKey,
     mppSecretKey,
     port,
     hostname: '127.0.0.1' as const,
@@ -62,6 +64,7 @@ function buildConfig() {
       streetview: '0.001',
       textsearch: '0.001',
       photo: '0.001',
+      quote: '0.001',
     }),
     // Upstream Google Maps base URLs
     upstream: Object.freeze({
@@ -69,6 +72,7 @@ function buildConfig() {
       textsearch: 'https://maps.googleapis.com/maps/api/place/textsearch/json',
       // Places API (new) — different host. Photo media path is templated.
       placesNew: 'https://places.googleapis.com',
+      finnhubQuote: 'https://finnhub.io/api/v1/quote',
     }),
     // Upstream fetch timeout — protects the reseller from hung Google calls
     upstreamTimeoutMs: 15_000,

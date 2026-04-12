@@ -326,11 +326,9 @@ export default function HousingPage() {
     loadListings();
   }, [loadListings]);
 
-  // Auto-refresh on stale cache. On mount (and when the configured city
-  // changes), check listings-meta to see if we have fresh data. If not,
-  // POST to refresh-listings — server enforces the cooldown so this is
-  // safe to call on every reload. After the refresh resolves (or skips),
-  // re-run loadListings to pick up the new data.
+  // Stale-data check. On mount, check listings-meta to see if data is
+  // fresh. If stale, show a banner — do NOT auto-refresh. Refreshing
+  // costs real money (MPP calls) and must be user-initiated.
   const [refreshStatus, setRefreshStatus] = useState<{
     active: boolean;
     message: string | null;
@@ -359,54 +357,21 @@ export default function HousingPage() {
         if (meta.rowCount === 0) {
           isStale = true;
         } else if (meta.newestLastSeen) {
-          // SQLite returns 'YYYY-MM-DD HH:MM:SS' (UTC, no TZ designator).
-          // Append Z to force UTC parsing — otherwise it's read as local.
           const newestMs = new Date(meta.newestLastSeen.replace(' ', 'T') + 'Z').getTime();
           isStale = Date.now() - newestMs > staleMs;
         }
 
         if (!isStale) return;
 
+        // Show banner instead of auto-refreshing. User clicks Refresh
+        // Data button to trigger the paid API calls.
+        const age = meta.newestLastSeen
+          ? `${Math.round((Date.now() - new Date(meta.newestLastSeen.replace(' ', 'T') + 'Z').getTime()) / 86400000)}d old`
+          : 'empty';
         setRefreshStatus({
-          active: true,
-          message: `Refreshing listings for ${city}, ${stateCode}…`,
+          active: false,
+          message: `Listing data is stale (${age}). Click Refresh Data to update.`,
         });
-
-        const refreshRes = await fetch('/api/housing/refresh-listings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ city, state: stateCode }),
-        });
-        const refreshData = await refreshRes.json();
-
-        if (refreshData.skipped) {
-          if (refreshData.skippedReason === 'cooldown') {
-            const m = refreshData.cooldownMinutesRemaining;
-            setRefreshStatus({
-              active: false,
-              message: `Auto-refresh paused — last attempt ${60 - m}m ago. Retry in ${m}m.`,
-            });
-          } else {
-            setRefreshStatus({ active: false, message: null });
-          }
-        } else if (refreshData.error) {
-          setRefreshStatus({
-            active: false,
-            message: `Refresh failed: ${refreshData.detail ?? refreshData.error}`,
-          });
-        } else {
-          const truncatedNote = refreshData.truncated
-            ? ' (more results exist beyond the safety cap)'
-            : '';
-          setRefreshStatus({
-            active: false,
-            message: `Refreshed ${refreshData.fetched.toLocaleString()} listings across ${refreshData.pages} pages for $${refreshData.cost.toFixed(3)}${truncatedNote}`,
-          });
-          // Auto-clear the success toast after 6 seconds.
-          setTimeout(() => setRefreshStatus({ active: false, message: null }), 6000);
-          // Reload listings to pick up the new rows.
-          loadListings();
-        }
       } catch (err) {
         setRefreshStatus({
           active: false,

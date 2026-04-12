@@ -88,6 +88,7 @@ app.get('/health', (c) =>
     chain: config.chain.name,
     chainId: config.chain.id,
     gmapsKeyPresent: !!config.googleMapsApiKey,
+    finnhubKeyPresent: !!config.finnhubApiKey,
     modes: ['confirmed', 'fast'],
   })
 );
@@ -235,6 +236,42 @@ app.get(
   streetviewMetadataHandler
 );
 
+// ── Route handler — Finnhub quote ───────────────────────────────────────────
+
+async function quoteHandler(c: Context): Promise<Response> {
+  markHandlerEntry(c);
+  try {
+    const symbol = c.req.query('symbol');
+    if (!symbol) {
+      recordError(c, 'missing symbol');
+      markPhase(c, 'T5');
+      return c.json({ error: 'missing ?symbol= query param' }, 400);
+    }
+    if (!config.finnhubApiKey) {
+      recordError(c, 'no FINNHUB_API_KEY');
+      markPhase(c, 'T5');
+      return c.json({ error: 'Finnhub API key not configured' }, 500);
+    }
+    markPhase(c, 'T2');
+    const url = `${config.upstream.finnhubQuote}?symbol=${encodeURIComponent(symbol)}&token=${config.finnhubApiKey}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(config.upstreamTimeoutMs) });
+    markPhase(c, 'T3');
+    const text = await response.text();
+    markPhase(c, 'T4');
+    recordUpstream(c, `finnhub.io/api/v1/quote?symbol=${symbol}`, response.status, text.length);
+    const out = new Response(text, {
+      status: response.status,
+      headers: { 'content-type': 'application/json' },
+    });
+    markPhase(c, 'T5');
+    return out;
+  } catch (err) {
+    recordError(c, (err as Error).message);
+    markPhase(c, 'T5');
+    return c.json({ error: 'upstream failed', message: (err as Error).message }, 502);
+  }
+}
+
 // ── Routes — confirmed mode ─────────────────────────────────────────────────
 
 app.get(
@@ -256,6 +293,15 @@ app.get(
   timed('photo', 'confirmed'),
   mppxConfirmed.charge({ amount: config.prices.photo, description: 'Google Places Photo (confirmed)' }),
   photoHandler
+);
+
+// ── Route — Finnhub stock quote ─────────────────────────────────────────────
+
+app.get(
+  '/quote',
+  timed('quote', 'confirmed'),
+  mppxConfirmed.charge({ amount: config.prices.quote, description: 'Finnhub Stock Quote' }),
+  quoteHandler
 );
 
 // ── Routes — fast mode (waitForConfirmation: false) ─────────────────────────
