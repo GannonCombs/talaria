@@ -110,3 +110,19 @@ registerModule({
   }),
   getTables: () => [],
 });
+
+registerModule({
+  id: 'fitness-tracker',
+  name: 'Fitness Tracker',
+  icon: 'Activity',
+  route: '/fitness-tracker',
+  services: [],
+  getDashboardMetrics: async () => ({
+    primary: {
+      label: 'Fitness Tracker',
+      value: '—',
+    },
+    secondary: [],
+  }),
+  getTables: () => [],
+});
