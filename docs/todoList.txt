@@ -1,0 +1,21 @@
+*General*
+
+Cleetus
+
+*Housing*
+
+Allow different config (city, credit score, etc.)
+Scoring system. Wire up more datapoints.
+Find a better way to show Data in both panels (Top Matches and Personal Details going offscreen)
+Alerts/email? Maybe once I'm more seriously shopping.
+
+*Portfolio*
+Cost Info Button
+Creat view with Stitch
+
+*Food*
+Cost Info Button
+Create view with Stitch
+
+*Fitness Tracker*
+Create view with Stitch
