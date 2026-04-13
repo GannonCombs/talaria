@@ -81,12 +81,12 @@ export async function fetchMarketStats(zip: string): Promise<MarketStats | null>
     return cached.stats;
   }
 
-  // TODO: When Tempo wallet is live, make MPP call to RentCast here:
-  // const response = await tempoFetch(`https://rentcast.mpp.tempo.xyz/v1/markets?zip=${zip}`);
-  // logMppTransaction({ service: 'RentCast', module: 'housing', endpoint: '/v1/markets', costUsd: 0.03 });
-  // Cache and return response.
+  // Live RentCast calls are available via paidFetch() but intentionally
+  // not auto-triggered here — each call costs $0.033 and a full Austin
+  // refresh runs $0.33-$1.00. Listings refresh via the Refresh Data
+  // button on the housing page (POST /api/housing/refresh-listings).
 
-  // For now, return cached data (seeded by seed.ts)
+  // Return cached data from DB
   return cached?.stats ?? null;
 }
 
