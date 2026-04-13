@@ -89,6 +89,7 @@ app.get('/health', (c) =>
     chainId: config.chain.id,
     gmapsKeyPresent: !!config.googleMapsApiKey,
     finnhubKeyPresent: !!config.finnhubApiKey,
+    resyKeyPresent: !!config.resyApiKey,
     modes: ['confirmed', 'fast'],
   })
 );
@@ -236,6 +237,129 @@ app.get(
   streetviewMetadataHandler
 );
 
+// ── Route handler — Resy (search + availability) ────────────────────────────
+
+// Resy/Imperva CDN blocks requests without a browser User-Agent
+const RESY_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3.1 Safari/605.1.15';
+
+// Resy venue search — POST /3/venuesearch/search
+async function resySearchHandler(c: Context): Promise<Response> {
+  markHandlerEntry(c);
+  try {
+    if (!config.resyApiKey || !config.resyAuthToken) {
+      recordError(c, 'no RESY credentials');
+      markPhase(c, 'T5');
+      return c.json({ error: 'Resy API credentials not configured' }, 500);
+    }
+
+    const params = new URL(c.req.url).searchParams;
+    const lat = parseFloat(params.get('lat') ?? '30.2672');
+    const long = parseFloat(params.get('long') ?? '-97.7431');
+    const query = params.get('query') ?? '';
+    const perPage = parseInt(params.get('per_page') ?? '10', 10);
+
+    const url = `${config.upstream.resy}/3/venuesearch/search`;
+    const body = JSON.stringify({
+      geo: { latitude: lat, longitude: long },
+      query,
+      per_page: perPage,
+      page: 1,
+      types: ['venue'],
+    });
+
+    markPhase(c, 'T2');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `ResyAPI api_key="${config.resyApiKey}"`,
+        'X-Resy-Auth-Token': config.resyAuthToken,
+        'X-Resy-Universal-Auth': config.resyAuthToken,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Origin': 'https://resy.com',
+        'Referer': 'https://resy.com/',
+        'User-Agent': RESY_UA,
+      },
+      body,
+      signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+    });
+    markPhase(c, 'T3');
+    const text = await response.text();
+    markPhase(c, 'T4');
+    recordUpstream(c, 'api.resy.com/3/venuesearch/search', response.status, text.length);
+    const out = new Response(text, {
+      status: response.status,
+      headers: { 'content-type': 'application/json' },
+    });
+    markPhase(c, 'T5');
+    return out;
+  } catch (err) {
+    recordError(c, (err as Error).message);
+    markPhase(c, 'T5');
+    return c.json({ error: 'upstream failed', message: (err as Error).message }, 502);
+  }
+}
+
+// Resy availability — POST /4/find with JSON body
+async function resyAvailabilityHandler(c: Context): Promise<Response> {
+  markHandlerEntry(c);
+  try {
+    if (!config.resyApiKey || !config.resyAuthToken) {
+      recordError(c, 'no RESY credentials');
+      markPhase(c, 'T5');
+      return c.json({ error: 'Resy API credentials not configured' }, 500);
+    }
+
+    const params = new URL(c.req.url).searchParams;
+    const venueId = parseInt(params.get('venue_id') ?? '0', 10);
+    const day = params.get('day') ?? new Date().toISOString().split('T')[0];
+    const partySize = parseInt(params.get('party_size') ?? '2', 10);
+
+    const url = `${config.upstream.resy}/4/find`;
+    const body = JSON.stringify({
+      lat: 0,
+      long: 0,
+      day,
+      party_size: partySize,
+      venue_id: venueId,
+    });
+
+    markPhase(c, 'T2');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `ResyAPI api_key="${config.resyApiKey}"`,
+        'X-Resy-Auth-Token': config.resyAuthToken,
+        'X-Resy-Universal-Auth': config.resyAuthToken,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Origin': 'https://resy.com',
+        'Referer': 'https://resy.com/',
+        'User-Agent': RESY_UA,
+      },
+      body,
+      signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+    });
+    markPhase(c, 'T3');
+    const text = await response.text();
+    markPhase(c, 'T4');
+    if (!response.ok) {
+      console.error(`[resy-availability] Resy returned ${response.status} for venue ${venueId} day=${day} party=${partySize}: ${text.slice(0, 200)}`);
+    }
+    recordUpstream(c, `api.resy.com/4/find (venue ${venueId})`, response.status, text.length);
+    const out = new Response(text, {
+      status: response.status,
+      headers: { 'content-type': 'application/json' },
+    });
+    markPhase(c, 'T5');
+    return out;
+  } catch (err) {
+    recordError(c, (err as Error).message);
+    markPhase(c, 'T5');
+    return c.json({ error: 'upstream failed', message: (err as Error).message }, 502);
+  }
+}
+
 // ── Route handler — Finnhub quote ───────────────────────────────────────────
 
 async function quoteHandler(c: Context): Promise<Response> {
@@ -302,6 +426,22 @@ app.get(
   timed('quote', 'confirmed'),
   mppxConfirmed.charge({ amount: config.prices.quote, description: 'Finnhub Stock Quote' }),
   quoteHandler
+);
+
+// ── Routes — Resy restaurant search + availability ──────────────────────────
+
+app.get(
+  '/resy/search',
+  timed('resy-search', 'confirmed'),
+  mppxConfirmed.charge({ amount: config.prices.resySearch, description: 'Resy Venue Search' }),
+  resySearchHandler
+);
+
+app.get(
+  '/resy/availability',
+  timed('resy-availability', 'confirmed'),
+  mppxConfirmed.charge({ amount: config.prices.resyAvailability, description: 'Resy Availability' }),
+  resyAvailabilityHandler
 );
 
 // ── Routes — fast mode (waitForConfirmation: false) ─────────────────────────

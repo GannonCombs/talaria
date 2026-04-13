@@ -31,6 +31,8 @@ function optional(name: string, fallback: string): string {
 function buildConfig() {
   const googleMapsApiKey = required('GOOGLE_MAPS_API_KEY');
   const finnhubApiKey = optional('FINNHUB_API_KEY', '');
+  const resyApiKey = optional('RESY_API_KEY', '');
+  const resyAuthToken = optional('RESY_AUTH_TOKEN', '');
   const mppSecretKey = required('MPP_SECRET_KEY');
   const port = parseInt(optional('RESELLER_PORT', '8787'), 10);
   const logDir = optional('LOG_DIR', './logs');
@@ -42,6 +44,8 @@ function buildConfig() {
   return Object.freeze({
     googleMapsApiKey,
     finnhubApiKey,
+    resyApiKey,
+    resyAuthToken,
     mppSecretKey,
     port,
     hostname: '127.0.0.1' as const,
@@ -65,6 +69,8 @@ function buildConfig() {
       textsearch: '0.001',
       photo: '0.001',
       quote: '0.001',
+      resySearch: '0.001',
+      resyAvailability: '0.001',
     }),
     // Upstream Google Maps base URLs
     upstream: Object.freeze({
@@ -73,6 +79,7 @@ function buildConfig() {
       // Places API (new) — different host. Photo media path is templated.
       placesNew: 'https://places.googleapis.com',
       finnhubQuote: 'https://finnhub.io/api/v1/quote',
+      resy: 'https://api.resy.com',
     }),
     // Upstream fetch timeout — protects the reseller from hung Google calls
     upstreamTimeoutMs: 15_000,
