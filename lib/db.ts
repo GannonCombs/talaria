@@ -102,6 +102,44 @@ function runMigrations(db: Database.Database, fromVersion: number): void {
       db.exec(`ALTER TABLE housing_listings ADD COLUMN crime_count INTEGER`);
     }
   }
+
+  if (fromVersion < 9) {
+    // Portfolio module: accounts, transactions, manual balances.
+    // Idempotent — CREATE TABLE IF NOT EXISTS.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS portfolio_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS portfolio_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES portfolio_accounts(id),
+        external_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        tx_type TEXT NOT NULL,
+        asset TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        usd_value REAL,
+        metadata TEXT,
+        UNIQUE(account_id, external_id, asset, quantity)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_portfolio_tx_asset ON portfolio_transactions(asset);
+      CREATE INDEX IF NOT EXISTS idx_portfolio_tx_account ON portfolio_transactions(account_id);
+
+      CREATE TABLE IF NOT EXISTS portfolio_manual_balances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES portfolio_accounts(id),
+        asset TEXT NOT NULL,
+        balance REAL NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(account_id, asset)
+      );
+    `);
+  }
 }
 
 function buildSchema(db: Database.Database): void {

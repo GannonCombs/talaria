@@ -12,6 +12,8 @@ Alerts/email? Maybe once I'm more seriously shopping.
 
 *Portfolio*
 Tax section. Edit: no more filing, but still holds tax details.
+Cost Info Button
+CSVs - WF, Fid, Binance, Kraken, OKX?, Merrill, EZ
 
 *Food*
 Create view with Stitch

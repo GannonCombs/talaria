@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import BackButton from '@/components/layout/BackButton';
 import { AlertTriangle, ChevronDown, Plus, Upload } from 'lucide-react';
 import AddPositionDrawer from '@/components/modules/portfolio/AddPositionDrawer';
 import AllocationView from '@/components/modules/portfolio/AllocationView';
 import PerformanceView from '@/components/modules/portfolio/PerformanceView';
+import { DEMO_MODE } from '@/lib/config';
 
 /* ── Old quote placeholder (commented out) ────────────────────────── */
 // interface QuoteData {
@@ -93,6 +94,32 @@ export default function PortfolioPage() {
   const [activeAccount, setActiveAccount] = useState<string>('All');
   const [showAll, setShowAll] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportStatus(`Uploading ${file.name}...`);
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch('/api/portfolio/import', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        setImportStatus(`Error: ${data.error ?? res.status}`);
+      } else {
+        setImportStatus(
+          `${data.format}: ${data.insertedRows} new, ${data.duplicatesSkipped} duplicates (${data.accountName})`
+        );
+      }
+    } catch (err) {
+      setImportStatus(`Error: ${(err as Error).message}`);
+    } finally {
+      e.target.value = ''; // allow re-uploading same file
+    }
+  }
 
   const accountCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -137,17 +164,21 @@ export default function PortfolioPage() {
             <div>
               <p className="text-[10px] text-on-surface-variant section-header mb-1">Net Worth</p>
               <h3 className="text-4xl font-mono text-primary font-bold tracking-tight">
-                $847,291.44
+                {DEMO_MODE ? '$847,291.44' : '$—'}
               </h3>
             </div>
             <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 font-mono">
-              +12.4% (YTD)
+              {DEMO_MODE ? '+12.4% (YTD)' : '— (YTD)'}
             </span>
           </div>
           <div className="h-48 w-full relative">
             <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 800 200">
-              <path className="fill-primary/5" d="M0,180 Q100,160 200,150 T400,100 T600,60 T800,40 L800,200 L0,200 Z" />
-              <path d="M0,180 Q100,160 200,150 T400,100 T600,60 T800,40" fill="none" stroke="#46f1c5" strokeWidth="2.5" />
+              {DEMO_MODE && (
+                <>
+                  <path className="fill-primary/5" d="M0,180 Q100,160 200,150 T400,100 T600,60 T800,40 L800,200 L0,200 Z" />
+                  <path d="M0,180 Q100,160 200,150 T400,100 T600,60 T800,40" fill="none" stroke="#46f1c5" strokeWidth="2.5" />
+                </>
+              )}
             </svg>
             <div className="absolute inset-0 flex justify-between items-end pb-1 px-1">
               <span className="font-mono text-[9px] text-on-surface-variant/50">JAN 01</span>
@@ -165,7 +196,7 @@ export default function PortfolioPage() {
           <div className="relative w-48 h-48 flex items-center justify-center">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15.9" fill="transparent" stroke="#262a31" strokeWidth="4" />
-              {(() => {
+              {DEMO_MODE && (() => {
                 let offset = 0;
                 return ALLOCATION.map((seg) => {
                   const el = (
@@ -185,8 +216,8 @@ export default function PortfolioPage() {
               })()}
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-sm font-bold uppercase text-on-surface">Stocks</span>
-              <span className="text-lg font-mono font-bold text-primary">45%</span>
+              <span className="text-sm font-bold uppercase text-on-surface">{DEMO_MODE ? 'Stocks' : '—'}</span>
+              <span className="text-lg font-mono font-bold text-primary">{DEMO_MODE ? '45%' : '—'}</span>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-6 w-full text-[10px] text-on-surface-variant">
@@ -204,19 +235,19 @@ export default function PortfolioPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-primary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Total Invested</p>
-          <p className="font-mono text-xl text-on-surface">$512,900.00</p>
+          <p className="font-mono text-xl text-on-surface">{DEMO_MODE ? '$512,900.00' : '$—'}</p>
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-secondary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Total Return</p>
-          <p className="font-mono text-xl text-secondary">+$334,391.44</p>
+          <p className="font-mono text-xl text-secondary">{DEMO_MODE ? '+$334,391.44' : '$—'}</p>
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-on-surface-variant/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Annualized</p>
-          <p className="font-mono text-xl text-on-surface">14.2%</p>
+          <p className="font-mono text-xl text-on-surface">{DEMO_MODE ? '14.2%' : '—'}</p>
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-tertiary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Cash Position</p>
-          <p className="font-mono text-xl text-on-surface">$102,492.12</p>
+          <p className="font-mono text-xl text-on-surface">{DEMO_MODE ? '$102,492.12' : '$—'}</p>
         </div>
       </div>
 
@@ -270,13 +301,28 @@ export default function PortfolioPage() {
               <Plus size={14} strokeWidth={2} />
               Add Position
             </button>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition-colors duration-75">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition-colors duration-75"
+            >
               <Upload size={14} strokeWidth={2} />
               Import CSV
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
           </div>
         </div>
 
+        {importStatus && (
+          <div className="px-4 py-2 text-xs text-on-surface-variant border-b border-outline bg-surface-container-lowest font-mono">
+            {importStatus}
+          </div>
+        )}
         {activeTab === 'Holdings' ? (
           <>
             {/* Account filter pills */}
@@ -291,7 +337,7 @@ export default function PortfolioPage() {
               >
                 All
               </button>
-              {accounts.map((acct) => (
+              {DEMO_MODE && accounts.map((acct) => (
                 <button
                   key={acct}
                   onClick={() => { setActiveAccount(acct); setShowAll(false); }}
@@ -324,7 +370,9 @@ export default function PortfolioPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/10">
-                  {visible.map((h) => (
+                  {!DEMO_MODE ? (
+                    <tr><td colSpan={9} className="p-8 text-center text-on-surface-variant text-sm">No holdings data. Enable demo mode to preview.</td></tr>
+                  ) : visible.map((h) => (
                     <tr key={h.ticker} className="hover:bg-surface-bright transition-colors duration-75">
                       {/* Asset — colored left border + type subtitle */}
                       <td className="p-3 pl-0">
@@ -402,6 +450,7 @@ export default function PortfolioPage() {
                     </tr>
                   ))}
                 </tbody>
+
               </table>
             </div>
 
@@ -416,9 +465,9 @@ export default function PortfolioPage() {
             )}
           </>
         ) : activeTab === 'Allocation' ? (
-          <AllocationView />
+          DEMO_MODE ? <AllocationView /> : <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm">No allocation data</div>
         ) : activeTab === 'Performance' ? (
-          <PerformanceView />
+          DEMO_MODE ? <PerformanceView /> : <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm">No performance data</div>
         ) : (
           <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm">
             {activeTab} view coming soon
@@ -436,14 +485,20 @@ export default function PortfolioPage() {
             </h4>
           </div>
           <div className="space-y-3">
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              Your <span className="text-on-surface font-bold">Technology concentration</span> is
-              12% above benchmark. Consider rebalancing into Healthcare or Consumer Staples.
-            </p>
-            <p className="text-xs text-secondary leading-relaxed flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-              Outperforming 60/40 benchmark by 4.2% this quarter.
-            </p>
+            {DEMO_MODE ? (
+              <>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Your <span className="text-on-surface font-bold">Technology concentration</span> is
+                  12% above benchmark. Consider rebalancing into Healthcare or Consumer Staples.
+                </p>
+                <p className="text-xs text-secondary leading-relaxed flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
+                  Outperforming 60/40 benchmark by 4.2% this quarter.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-on-surface-variant leading-relaxed">—</p>
+            )}
           </div>
         </div>
 
@@ -452,15 +507,15 @@ export default function PortfolioPage() {
             <h4 className="text-[10px] text-on-surface-variant section-header mb-1">
               Projected Annual Income
             </h4>
-            <p className="text-xl font-mono text-on-surface">$12,490.12</p>
+            <p className="text-xl font-mono text-on-surface">{DEMO_MODE ? '$12,490.12' : '$—'}</p>
           </div>
           <div className="mt-4">
             <div className="flex justify-between text-[10px] font-mono mb-1.5 uppercase text-on-surface-variant">
-              <span>Target $20,000</span>
-              <span className="text-primary">62.4%</span>
+              <span>{DEMO_MODE ? 'Target $20,000' : 'Target $—'}</span>
+              <span className="text-primary">{DEMO_MODE ? '62.4%' : '—'}</span>
             </div>
             <div className="h-1.5 w-full bg-surface-container-highest overflow-hidden">
-              <div className="h-full bg-primary" style={{ width: '62.4%' }} />
+              <div className="h-full bg-primary" style={{ width: DEMO_MODE ? '62.4%' : '0%' }} />
             </div>
           </div>
         </div>
