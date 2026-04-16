@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Wallet, Receipt, Info } from 'lucide-react';
 import { useCostTracker } from '@/hooks/useCostTracker';
 import { useWallet } from '@/hooks/useWallet';
@@ -17,6 +18,11 @@ export default function TopBar() {
   const { today } = useCostTracker();
   const { totalUsd } = useWallet();
   const [costInfoOpen, setCostInfoOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Derive module ID from the current route (e.g. /housing → 'housing')
+  const moduleId = ['housing', 'portfolio', 'food', 'fitness-tracker']
+    .find((m) => pathname.startsWith(`/${m}`));
 
   return (
     <>
@@ -67,7 +73,7 @@ export default function TopBar() {
         </div>
       </header>
 
-      <CostInfoModal open={costInfoOpen} onClose={() => setCostInfoOpen(false)} />
+      <CostInfoModal open={costInfoOpen} onClose={() => setCostInfoOpen(false)} moduleId={moduleId} />
     </>
   );
 }
