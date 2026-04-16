@@ -57,7 +57,7 @@ export const DEFAULT_PREFERENCES: Record<string, string> = {
   'housing.target_zips': '["78745","78704","78749","78748","78731"]',
   'housing.work_address': '{"lat":30.4441,"lng":-97.7584,"label":"Visa Jollyville"}',
   'housing.downtown_address': '{"lat":30.2672,"lng":-97.7431,"label":"Downtown Austin"}',
-  'housing.scoring_weights': '{"crime":9,"schools":5,"commute_work":7,"commute_downtown":6,"walkability":2,"income":5,"price":8}',
+  'housing.scoring_weights': '{"crime":9,"schools":5,"commute_work":7,"commute_social":6,"walkability":2,"avm":5,"price":8}',
   'housing.alert_min_score': '85',
   'housing.max_price': '550000',
 };

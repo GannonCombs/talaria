@@ -5,9 +5,9 @@ export interface ScoringWeights {
   crime: number;
   schools: number;
   commute_work: number;
-  commute_downtown: number;
+  commute_social: number;
   walkability: number;
-  income: number;
+  avm: number;
   price: number;
 }
 
@@ -21,8 +21,8 @@ export interface ListingScoreData {
   // walk_score_raw: number | null;
   // school_rating_raw: number | null;
   // commute_work_min: number | null;
-  // commute_downtown_min: number | null;
-  // median_income: number | null;
+  // commute_social_min: number | null;
+  // avm_ratio: number | null;
 }
 
 interface DimensionDef {
@@ -37,8 +37,8 @@ const DIMENSIONS: DimensionDef[] = [
   // { key: 'walkability', getValue: (l) => l.walk_score_raw, invert: false },
   // { key: 'schools', getValue: (l) => l.school_rating_raw, invert: false },
   // { key: 'commute_work', getValue: (l) => l.commute_work_min, invert: true },
-  // { key: 'commute_downtown', getValue: (l) => l.commute_downtown_min, invert: true },
-  // { key: 'income', getValue: (l) => l.median_income, invert: false },
+  // { key: 'commute_social', getValue: (l) => l.commute_social_min, invert: true },
+  // { key: 'avm', getValue: (l) => l.avm_ratio, invert: false },
   // { key: 'price', getValue: (l) => l.price, invert: true },
 ];
 

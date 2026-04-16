@@ -85,9 +85,9 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   crime: 9,
   schools: 5,
   commute_work: 7,
-  commute_downtown: 6,
+  commute_social: 6,
   walkability: 2,
-  income: 5,
+  avm: 5,
   price: 8,
 };
 

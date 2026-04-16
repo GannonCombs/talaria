@@ -322,10 +322,10 @@ export default function LeftPanel({
           <WeightSlider label="Safety / Crime" value={weights.crime} onChange={(v) => updateWeight('crime', v)} wired={wiredSet.has('crime')} />
           <WeightSlider label="Schools" value={weights.schools} onChange={(v) => updateWeight('schools', v)} wired={wiredSet.has('schools')} />
           <WeightSlider label="Commute: Work" value={weights.commute_work} onChange={(v) => updateWeight('commute_work', v)} wired={wiredSet.has('commute_work')} />
-          <WeightSlider label="Commute: Social" value={weights.commute_downtown} onChange={(v) => updateWeight('commute_downtown', v)} wired={wiredSet.has('commute_downtown')} />
+          <WeightSlider label="Commute: Social" value={weights.commute_social} onChange={(v) => updateWeight('commute_social', v)} wired={wiredSet.has('commute_social')} />
           <WeightSlider label="Walkability" value={weights.walkability} onChange={(v) => updateWeight('walkability', v)} wired={wiredSet.has('walkability')} />
           <WeightSlider label="Price Value" value={weights.price} onChange={(v) => updateWeight('price', v)} wired={wiredSet.has('price')} />
-          <WeightSlider label="AVM (Underpriced)" value={weights.income} onChange={(v) => updateWeight('income', v)} wired={wiredSet.has('income')} />
+          <WeightSlider label="AVM (Underpriced)" value={weights.avm} onChange={(v) => updateWeight('avm', v)} wired={wiredSet.has('avm')} />
         </div>
         <div className="text-[10px] text-on-surface-variant mt-4">
           Dimensions with a checkmark have real data. Others use placeholder values and are excluded from scoring until wired up.

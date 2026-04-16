@@ -9,9 +9,9 @@ const defaultWeights: ScoringWeights = {
   crime: 9,
   schools: 5,
   commute_work: 7,
-  commute_downtown: 6,
+  commute_social: 6,
   walkability: 2,
-  income: 5,
+  avm: 5,
   price: 8,
 };
 
@@ -54,8 +54,8 @@ describe('computeListingScore', () => {
 
   it('returns 0 when all weights are 0', () => {
     const zeroWeights: ScoringWeights = {
-      crime: 0, schools: 0, commute_work: 0, commute_downtown: 0,
-      walkability: 0, income: 0, price: 0,
+      crime: 0, schools: 0, commute_work: 0, commute_social: 0,
+      walkability: 0, avm: 0, price: 0,
     };
     const wired = new Set(['crime']);
     const mm = buildMinMax(listings, wired);
