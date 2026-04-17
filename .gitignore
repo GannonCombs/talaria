@@ -33,6 +33,8 @@ keys/
 # Cached MPP-fetched listing photos (server-side disk cache)
 public/listing-photos/
 
+docs/*.pdf
+
 # Claude
 .claude/
 

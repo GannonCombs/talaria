@@ -97,9 +97,6 @@ export function setManualBalance(accountId: number, asset: string, balance: numb
 
 // ── Compute holdings ────────────────────────────────────────────────────
 
-// Transaction types that represent value you don't fully control yet.
-const UNVESTED_TX_TYPES = new Set(['rsu']);
-
 function getSnapshotPrices(): Map<string, number> {
   const db = getDb();
   const snapshotRows = db.prepare(`

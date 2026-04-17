@@ -10,7 +10,7 @@ interface PdfParseResult {
   documentType: 'espp' | 'rsu' | 'vested' | 'unknown';
 }
 
-function detectMerrillType(text: string): 'espp' | 'rsu' | 'vested' | 'unknown' {
+export function detectMerrillType(text: string): 'espp' | 'rsu' | 'vested' | 'unknown' {
   if (text.includes('RSU/AR') || text.includes('Restricted Unit Balance')) return 'rsu';
   if (text.includes('Lapse') && !text.includes('Qualified')) return 'vested';
   if (text.includes('Qualified') || text.includes('Disqualified')) return 'espp';
@@ -19,7 +19,7 @@ function detectMerrillType(text: string): 'espp' | 'rsu' | 'vested' | 'unknown' 
 }
 
 // Extract ticker and price: "V - $317.830000 as of" or "V $315.10"
-function extractTickerInfo(text: string): { ticker: string; currentPrice: number } | null {
+export function extractTickerInfo(text: string): { ticker: string; currentPrice: number } | null {
   // Try "V - $317.83 as of" pattern
   let match = text.match(/([A-Z]{1,5})\s*-\s*\$([0-9.]+)\s*as of/);
   if (match) return { ticker: match[1], currentPrice: parseFloat(match[2]) };
@@ -30,7 +30,7 @@ function extractTickerInfo(text: string): { ticker: string; currentPrice: number
 }
 
 // Extract cash balance: "USD $525.63"
-function extractCashBalance(text: string): number {
+export function extractCashBalance(text: string): number {
   const match = text.match(/Cash Balance[\s\S]*?USD\s*\$([0-9,.]+)/);
   if (!match) return 0;
   return parseFloat(match[1].replace(/,/g, ''));
@@ -41,7 +41,7 @@ function extractCashBalance(text: string): number {
 // followed by "USD", "$635.66" (market value), "$268.26QualifiedOpen2" (gain+metadata)
 // Restricted lots have "Restricted per\nPlan Rule -\nMM/DD/YYYY" and available qty 0.
 // Dates are on separate lines below in a block.
-function parseHoldingsRows(text: string, ticker: string, docType: 'espp' | 'vested'): ParsedTransaction[] {
+export function parseHoldingsRows(text: string, ticker: string, docType: 'espp' | 'vested'): ParsedTransaction[] {
   const out: ParsedTransaction[] = [];
 
   // Match data rows: qty$unitCost$costBasis (no spaces)
@@ -61,10 +61,15 @@ function parseHoldingsRows(text: string, ticker: string, docType: 'espp' | 'vest
     rows.push({ qty, unitCost, costBasis, endIndex: match.index + match[0].length });
   }
 
-  // Collect dates from the date blocks (MM/DD/YYYY on their own lines)
+  // Collect acquisition dates (MM/DD/YYYY on their own lines).
+  // Skip dates that immediately follow "Plan Rule -" — those are restriction
+  // release dates, not acquisition dates.
   const datePattern = /^(\d{2}\/\d{2}\/\d{4})$/gm;
   const dates: string[] = [];
   while ((match = datePattern.exec(text)) !== null) {
+    // Check the line(s) immediately before this date for "Plan Rule"
+    const preceding = text.slice(Math.max(0, match.index - 30), match.index);
+    if (/Plan Rule\s*-?\s*$/i.test(preceding)) continue;
     dates.push(match[1]);
   }
 
@@ -122,7 +127,7 @@ function parseHoldingsRows(text: string, ticker: string, docType: 'espp' | 'vest
 
 // Parse RSU rows.
 // pdf-parse outputs: "11/19/2023RSU/ARShare10937037$315.100000$11,658.70"
-function parseRsuRows(text: string, ticker: string): ParsedTransaction[] {
+export function parseRsuRows(text: string, ticker: string): ParsedTransaction[] {
   const out: ParsedTransaction[] = [];
 
   // Match: date + RSU/AR + Share + unitsGranted + beginBal + 0 + currentBal + $price + $income
