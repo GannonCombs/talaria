@@ -107,6 +107,142 @@ async function fetchCoinGeckoPrices(tickers: string[]): Promise<{
   }
 }
 
+// ── Hiive (private company pricing — SpaceX, etc.) ──────────────────────
+
+function getHiiveToken(): string {
+  try {
+    const envPath = path.join(process.cwd(), 'mpp-reseller', '.env');
+    const content = fs.readFileSync(envPath, 'utf8');
+    const match = content.match(/HIIVE_TOKEN=(\S+)/);
+    return match?.[1] ?? '';
+  } catch {
+    return '';
+  }
+}
+
+// Tickers that should be priced via Hiive (private companies).
+// Value is the search term used to find the company on Hiive.
+const HIIVE_TICKERS: Record<string, string> = {
+  RAMP: 'Ramp',
+};
+
+// Cache company ID lookups (company name → UUID)
+const hiiveCompanyIdCache = new Map<string, string>();
+
+async function searchHiiveCompany(searchText: string, token: string): Promise<string | null> {
+  if (hiiveCompanyIdCache.has(searchText)) return hiiveCompanyIdCache.get(searchText)!;
+
+  try {
+    const res = await fetch('https://api.hiive.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Origin': 'https://app.hiive.com',
+        'Referer': 'https://app.hiive.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+      body: JSON.stringify({
+        operationName: 'companiesSearchListCompanies',
+        query: `query companiesSearchListCompanies($orderBy: ListCompaniesOrderBy!, $first: Int!, $searchText: String, $statuses: [CompanyStatus!]) {
+          listCompanies(orderBy: $orderBy, first: $first, searchText: $searchText, statuses: $statuses) {
+            edges { node { id name __typename } __typename }
+            __typename
+          }
+        }`,
+        variables: { first: 1, orderBy: 'MARKET_ACTIVITY', searchText, statuses: ['LISTED'] },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const id = data?.data?.listCompanies?.edges?.[0]?.node?.id ?? null;
+    if (id) hiiveCompanyIdCache.set(searchText, id);
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHiivePrice(companyId: string, token: string): Promise<number | null> {
+  try {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 30); // last 30 days
+    const res = await fetch('https://api.hiive.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Origin': 'https://app.hiive.com',
+        'Referer': 'https://app.hiive.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+      body: JSON.stringify({
+        operationName: 'basicTraderCompanyPriceData',
+        query: `query basicTraderCompanyPriceData($companyId: ID!, $startDate: Date!, $indicators: [Indicator]!) {
+          companyPriceDataV2(companyId: $companyId, startDate: $startDate, indicators: $indicators) {
+            dailyPriceData { day indexPrice __typename }
+            indexPriceTrends { currentPrice trendName changePercentage __typename }
+            __typename
+          }
+        }`,
+        variables: {
+          companyId,
+          startDate: startDate.toISOString().split('T')[0],
+          indicators: ['INDEX_PRICE'],
+        },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    // Try indexPriceTrends first (has currentPrice directly)
+    const trends = data?.data?.companyPriceDataV2?.indexPriceTrends;
+    if (Array.isArray(trends) && trends.length > 0) {
+      const current = trends.find((t: { trendName: string }) => t.trendName === '1M') ?? trends[0];
+      if (current?.currentPrice) {
+        return current.currentPrice / 100; // cents → dollars
+      }
+    }
+
+    // Fall back to last dailyPriceData entry
+    const daily = data?.data?.companyPriceDataV2?.dailyPriceData;
+    if (Array.isArray(daily) && daily.length > 0) {
+      const last = daily[daily.length - 1];
+      if (last?.indexPrice) {
+        return last.indexPrice / 100; // cents → dollars
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHiivePrices(tickers: string[]): Promise<Record<string, number>> {
+  const token = getHiiveToken();
+  if (!token) return {};
+
+  const prices: Record<string, number> = {};
+
+  for (const ticker of tickers) {
+    const searchTerm = HIIVE_TICKERS[ticker];
+    if (!searchTerm) continue;
+
+    const companyId = await searchHiiveCompany(searchTerm, token);
+    if (!companyId) continue;
+
+    const price = await fetchHiivePrice(companyId, token);
+    if (price !== null) {
+      prices[ticker] = price;
+    }
+  }
+
+  return prices;
+}
+
 // ── Route ───────────────────────────────────────────────────────────────
 
 const STABLECOINS = new Set(['USD', 'USDC', 'USDT']);
@@ -133,13 +269,15 @@ export async function GET(request: NextRequest) {
   // Stablecoins
   const cryptoTickers: string[] = [];
   const equityTickers: string[] = [];
+  const hiiveTickers: string[] = [];
 
   for (const asset of assets) {
     if (STABLECOINS.has(asset)) {
       prices[asset] = 1.0;
       dailyPcts[asset] = 0;
+    } else if (HIIVE_TICKERS[asset]) {
+      hiiveTickers.push(asset);
     } else if (ETF_FINNHUB_SYMBOLS[asset]) {
-      // Renamed ETF ticker — route to Finnhub with the original equity symbol
       equityTickers.push(asset);
     } else if (COINGECKO_IDS[asset]) {
       cryptoTickers.push(asset);
@@ -148,11 +286,12 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Fetch crypto (CoinGecko — one batch call) and equities (Finnhub — parallel) simultaneously
+  // Fetch all price sources simultaneously
   const apiKey = getFinnhubKey();
 
-  const [cgResult, ...finnhubResults] = await Promise.allSettled([
+  const [cgResult, hiiveResult, ...finnhubResults] = await Promise.allSettled([
     fetchCoinGeckoPrices(cryptoTickers),
+    fetchHiivePrices(hiiveTickers),
     ...equityTickers.map(async (ticker) => {
       if (!apiKey) return { ticker, price: null, dailyPct: null };
       const finnhubSymbol = ETF_FINNHUB_SYMBOLS[ticker] ?? ticker;
@@ -165,6 +304,11 @@ export async function GET(request: NextRequest) {
   if (cgResult.status === 'fulfilled') {
     Object.assign(prices, cgResult.value.prices);
     Object.assign(dailyPcts, cgResult.value.dailyPcts);
+  }
+
+  // Merge Hiive results
+  if (hiiveResult.status === 'fulfilled') {
+    Object.assign(prices, hiiveResult.value);
   }
 
   // Merge Finnhub results

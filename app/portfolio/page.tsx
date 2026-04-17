@@ -394,7 +394,7 @@ export default function PortfolioPage() {
           </h1>
         </div>
         <p className="text-xs text-on-surface-variant">
-          Data sources: Finnhub (free) · CoinGecko (free) · Manual entry (free)
+          Data sources: Finnhub (free) · CoinGecko (free) · Hiive (free)
         </p>
       </div>
 
