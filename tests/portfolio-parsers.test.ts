@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectFormat, parseCoinbase, parseBinance } from '@/lib/modules/portfolio/parsers';
+import { detectFormat, parseCoinbase, parseBinance, parseFidelity } from '@/lib/modules/portfolio/parsers';
 
 describe('detectFormat', () => {
   it('detects Coinbase format', () => {
@@ -118,5 +118,92 @@ describe('parseBinance', () => {
   it('returns empty for empty CSV', () => {
     expect(parseBinance('')).toHaveLength(0);
     expect(parseBinance(header)).toHaveLength(0);
+  });
+});
+
+describe('detectFormat — Fidelity', () => {
+  it('detects Fidelity format', () => {
+    const csv = 'Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today\'s Gain/Loss Dollar,Today\'s Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type\n';
+    expect(detectFormat(csv)).toBe('fidelity');
+  });
+
+  it('detects Fidelity with BOM', () => {
+    const csv = '\uFEFFAccount Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today\'s Gain/Loss Dollar,Today\'s Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type\n';
+    expect(detectFormat(csv)).toBe('fidelity');
+  });
+});
+
+describe('parseFidelity', () => {
+  const header = 'Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today\'s Gain/Loss Dollar,Today\'s Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type';
+
+  it('parses an equity position', () => {
+    const csv = `${header}\nX123,Individual,NVDA,NVIDIA CORPORATION COM,20,$198.35,-$0.52,$3967.00,-$10.40,-0.27%,+$1598.80,+67.51%,2.68%,$2368.20,$118.41,Margin,`;
+    const { transactions } = parseFidelity(csv);
+    const nvda = transactions.find((t) => t.asset === 'NVDA');
+    expect(nvda).toBeDefined();
+    expect(nvda!.quantity).toBe(20);
+    expect(nvda!.usd_value).toBeCloseTo(2368.20);
+    expect(nvda!.tx_type).toBe('snapshot');
+  });
+
+  it('parses money market as USD', () => {
+    const csv = `${header}\nX123,Individual,SPAXX**,HELD IN MONEY MARKET,,,,$136263.17,,,,,92.22%,,,Cash,`;
+    const { transactions } = parseFidelity(csv);
+    const usd = transactions.find((t) => t.asset === 'USD');
+    expect(usd).toBeDefined();
+    expect(usd!.quantity).toBeCloseTo(136263.17);
+  });
+
+  it('skips escrow positions with -- price', () => {
+    const csv = `${header}\nX123,Individual,901ESC012,CHROME HOLDING CO ESCROW,5,--,--,--,--,--,--,--,0.00%,$1491.86,$298.37,Margin,`;
+    const { transactions } = parseFidelity(csv);
+    expect(transactions).toHaveLength(0);
+  });
+
+  it('renames numeric fund codes to descriptions', () => {
+    const csv = `${header}\n89980,VISA 401K PLAN,92204E878,VANGUARD TARGET 2050,2200.861,$85.57,+$0.36,$188327.67,$0.00,0.00%,+$10288.35,+5.78%,100.00%,$178039.32,$80.90,,`;
+    const { transactions } = parseFidelity(csv);
+    const vt = transactions.find((t) => t.asset === 'VANGUARD TARGET 2050');
+    expect(vt).toBeDefined();
+    expect(vt!.quantity).toBeCloseTo(2200.861);
+  });
+
+  it('renames BTC ETF to avoid crypto collision', () => {
+    const csv = `${header}\nX123,Roth IRA,BTC,GRAYSCALE BITCOIN MINI TR ETF SHS NEW,23,$33.36,+$0.15,$767.28,+$3.45,+0.45%,+$340.33,+79.71%,1.98%,$426.95,$18.56,Cash,`;
+    const { transactions } = parseFidelity(csv);
+    const btc = transactions.find((t) => t.asset === 'BTC-ETF');
+    expect(btc).toBeDefined();
+    expect(btc!.quantity).toBe(23);
+  });
+
+  it('renames ETH ETF to avoid crypto collision', () => {
+    const csv = `${header}\nX123,Roth IRA,ETH,GRAYSCALE ETHEREUM STAKING MINI ETF,8,$22.40,-$0.15,$179.20,-$1.20,-0.67%,+$55.38,+44.72%,0.46%,$123.82,$15.48,Cash,`;
+    const { transactions } = parseFidelity(csv);
+    const eth = transactions.find((t) => t.asset === 'ETH-ETF');
+    expect(eth).toBeDefined();
+    expect(eth!.quantity).toBe(8);
+  });
+
+  it('stores snapshot price in metadata', () => {
+    const csv = `${header}\nX123,Individual,NVDA,NVIDIA CORPORATION COM,20,$198.35,-$0.52,$3967.00,-$10.40,-0.27%,+$1598.80,+67.51%,2.68%,$2368.20,$118.41,Margin,`;
+    const { transactions } = parseFidelity(csv);
+    const nvda = transactions.find((t) => t.asset === 'NVDA');
+    expect(nvda!.metadata).toBeDefined();
+    expect((nvda!.metadata as Record<string, unknown>).snapshotPrice).toBe(198.35);
+  });
+
+  it('consolidates all accounts under Fidelity', () => {
+    const csv = [
+      header,
+      'X123,Individual,NVDA,NVIDIA,20,$198.35,-$0.52,$3967.00,-$10.40,-0.27%,+$1598.80,+67.51%,2.68%,$2368.20,$118.41,Margin,',
+      '456,Roth IRA,GOOG,ALPHABET,10,$332.77,-$1.70,$3327.70,-$17.00,-0.51%,+$1327.00,+66.0%,22%,$2000.70,$200.07,Cash,',
+    ].join('\n');
+    const { accountName } = parseFidelity(csv);
+    expect(accountName).toBe('Fidelity');
+  });
+
+  it('returns empty for empty CSV', () => {
+    expect(parseFidelity('').transactions).toHaveLength(0);
+    expect(parseFidelity(header).transactions).toHaveLength(0);
   });
 });

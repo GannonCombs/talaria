@@ -156,12 +156,123 @@ function BreakdownRow({ slice, total, maxValue }: { slice: Slice; total: number;
   );
 }
 
+/* ── Real data helpers ────────────────────────────────────────────── */
+
+interface HoldingInput {
+  ticker: string;
+  account: string;
+  mktValue: number | null;
+}
+
+const STABLES = new Set(['USD', 'USDC', 'USDT']);
+
+// Known crypto tickers — anything in this set is crypto, everything else is equity/fund
+const CRYPTO_TICKERS = new Set([
+  'BTC', 'ETH', 'SOL', 'ATOM', 'LINK', 'UNI', 'XLM', 'AAVE', 'ALGO',
+  'COMP', 'FIL', 'GRT', 'IMX', 'LPT', 'SNX', 'ZRX', 'ICP', 'RNDR',
+  'JTO', 'POL', 'ALCX', 'CGLD', 'FORTH', 'MIR', 'OXT', 'RARI', 'UMA',
+  'NU', 'ETH2', 'MATIC', 'ADA', 'BNB', 'XRP', 'DOT', 'AVAX', 'DOGE',
+]);
+
+const ASSET_CLASS_COLORS: Record<string, string> = {
+  Stocks: '#46f1c5',
+  Crypto: '#22d3ee',
+  Cash: '#8b949e',
+  Other: '#ef4444',
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  Coinbase: '#f59e0b',
+  Binance: '#eab308',
+  Kraken: '#22d3ee',
+  Fidelity: '#46f1c5',
+  Merrill: '#a855f7',
+  'Wells Fargo': '#3b82f6',
+  EquityZen: '#67df70',
+};
+
+const PLATFORM_FALLBACK_COLORS = ['#46f1c5', '#f59e0b', '#22d3ee', '#3b82f6', '#a855f7', '#ef4444', '#67df70', '#8b949e'];
+
+function buildRealData(holdings: HoldingInput[]): Partial<Record<ViewKey, { slices: Slice[]; insight: string }>> {
+  const result: Partial<Record<ViewKey, { slices: Slice[]; insight: string }>> = {};
+
+  // Asset Class
+  const classGroups: Record<string, { value: number; assets: Set<string> }> = {};
+  for (const h of holdings) {
+    const v = h.mktValue ?? 0;
+    if (v <= 0) continue;
+    const cls = STABLES.has(h.ticker) ? 'Cash'
+      : CRYPTO_TICKERS.has(h.ticker) ? 'Crypto'
+      : 'Stocks';
+    if (!classGroups[cls]) classGroups[cls] = { value: 0, assets: new Set() };
+    classGroups[cls].value += v;
+    classGroups[cls].assets.add(h.ticker);
+  }
+  const classSlices: Slice[] = Object.entries(classGroups)
+    .sort((a, b) => b[1].value - a[1].value)
+    .map(([label, g]) => ({
+      label,
+      value: Math.round(g.value),
+      color: ASSET_CLASS_COLORS[label] ?? '#ef4444',
+      assets: [...g.assets].join(', '),
+    }));
+  if (classSlices.length > 0) {
+    const top = classSlices[0];
+    const topPct = Math.round((top.value / classSlices.reduce((s, sl) => s + sl.value, 0)) * 100);
+    result.class = {
+      slices: classSlices,
+      insight: `${top.label} represents ${topPct}% of your portfolio by asset class.`,
+    };
+  }
+
+  // Platform
+  const platGroups: Record<string, { value: number; assets: Set<string> }> = {};
+  for (const h of holdings) {
+    const v = h.mktValue ?? 0;
+    if (v <= 0) continue;
+    if (!platGroups[h.account]) platGroups[h.account] = { value: 0, assets: new Set() };
+    platGroups[h.account].value += v;
+    platGroups[h.account].assets.add(h.ticker);
+  }
+  const platSlices: Slice[] = Object.entries(platGroups)
+    .sort((a, b) => b[1].value - a[1].value)
+    .map(([label, g], i) => ({
+      label,
+      value: Math.round(g.value),
+      color: PLATFORM_COLORS[label] ?? PLATFORM_FALLBACK_COLORS[i % PLATFORM_FALLBACK_COLORS.length],
+      assets: [...g.assets].join(', '),
+    }));
+  if (platSlices.length > 0) {
+    const top = platSlices[0];
+    const total = platSlices.reduce((s, sl) => s + sl.value, 0);
+    const topPct = Math.round((top.value / total) * 100);
+    result.platform = {
+      slices: platSlices,
+      insight: `${top.label} holds ${topPct}% of your portfolio ($${top.value.toLocaleString()}).`,
+    };
+  }
+
+  return result;
+}
+
 /* ── Main component ───────────────────────────────────────────────── */
 
-export default function AllocationView() {
+interface AllocationViewProps {
+  holdings?: HoldingInput[];
+}
+
+export default function AllocationView({ holdings }: AllocationViewProps) {
   const [activeView, setActiveView] = useState<ViewKey>('class');
 
-  const { slices, insight } = DATA[activeView];
+  const hasRealHoldings = holdings && holdings.length > 0;
+  const realData = hasRealHoldings ? buildRealData(holdings) : {};
+  // If we have real holdings, only show views we can compute. Otherwise show demo data.
+  const viewData = hasRealHoldings
+    ? realData[activeView] ?? null
+    : DATA[activeView];
+  const hasData = viewData !== null && viewData.slices.length > 0;
+  const slices = viewData?.slices ?? [];
+  const insight = viewData?.insight ?? '';
   const total = slices.reduce((s, sl) => s + sl.value, 0);
   const maxValue = Math.max(...slices.map((s) => s.value));
 
@@ -190,6 +301,9 @@ export default function AllocationView() {
       </div>
 
       {/* Donut + breakdown layout */}
+      {!hasData ? (
+        <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm" />
+      ) :
       <div className="grid grid-cols-12 gap-8 items-start">
         {/* Donut */}
         <div className="col-span-12 md:col-span-4 flex flex-col items-center gap-4">
@@ -258,10 +372,10 @@ export default function AllocationView() {
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Insight callout */}
-      <div className="flex gap-3 p-4 bg-surface-container border-l-2 border-primary">
+      {hasData && insight && <div className="flex gap-3 p-4 bg-surface-container border-l-2 border-primary">
         <div className="shrink-0 mt-0.5">
           <div className="w-5 h-5 flex items-center justify-center bg-primary/10">
             <span className="text-primary text-[10px] font-mono font-bold">i</span>
@@ -270,7 +384,7 @@ export default function AllocationView() {
         <p className="text-xs text-on-surface-variant leading-relaxed">
           {insight}
         </p>
-      </div>
+      </div>}
     </div>
   );
 }

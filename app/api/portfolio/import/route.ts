@@ -32,11 +32,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'CSV content required' }, { status: 400 });
   }
 
-  const { format, transactions } = parseCsvFile(csv);
+  const result = parseCsvFile(csv);
+  const { format, transactions } = result;
 
   if (format === 'unknown') {
     return NextResponse.json(
-      { error: 'Unrecognized CSV format. Supported: Coinbase, Binance.' },
+      { error: 'Unrecognized CSV format. Supported: Coinbase, Binance, Fidelity.' },
       { status: 400 }
     );
   }
@@ -48,6 +49,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Fidelity: multi-account import (Individual, Roth IRA, 401K, etc.)
+  if (result.perAccountTransactions && result.perAccountTransactions.size > 0) {
+    let totalInserted = 0;
+    let totalParsed = 0;
+    const accountNames: string[] = [];
+
+    for (const [acctName, acctTxs] of result.perAccountTransactions) {
+      const name = accountNameOverride ?? acctName;
+      const accountId = getOrCreateAccount(name, 'brokerage');
+      totalInserted += insertTransactions(accountId, acctTxs);
+      totalParsed += acctTxs.length;
+      accountNames.push(name);
+    }
+
+    return NextResponse.json({
+      ok: true,
+      format,
+      accountName: accountNames.join(', '),
+      parsedRows: totalParsed,
+      insertedRows: totalInserted,
+      duplicatesSkipped: totalParsed - totalInserted,
+    });
+  }
+
+  // Single-account import (Coinbase, Binance)
   const accountName = accountNameOverride ?? (format === 'coinbase' ? 'Coinbase' : 'Binance');
   const accountType = 'exchange';
   const accountId = getOrCreateAccount(accountName, accountType);

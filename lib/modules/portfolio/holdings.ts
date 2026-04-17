@@ -11,6 +11,7 @@ export interface Holding {
   balance: number;
   costBasis: number | null;
   txCount: number;
+  snapshotPrice: number | null; // price from CSV snapshot (fallback when Finnhub misses)
 }
 
 export interface AccountRow {
@@ -120,12 +121,31 @@ export function getHoldings(): Holding[] {
     tx_count: number;
   }>;
 
+  // Extract snapshot prices from metadata (for assets Finnhub can't price)
+  const snapshotRows = db.prepare(`
+    SELECT asset, metadata FROM portfolio_transactions
+    WHERE tx_type = 'snapshot' AND metadata IS NOT NULL
+    ORDER BY timestamp DESC
+  `).all() as Array<{ asset: string; metadata: string }>;
+
+  const snapshotPrices = new Map<string, number>();
+  for (const row of snapshotRows) {
+    if (snapshotPrices.has(row.asset)) continue; // keep most recent
+    try {
+      const meta = JSON.parse(row.metadata);
+      if (meta.snapshotPrice && typeof meta.snapshotPrice === 'number') {
+        snapshotPrices.set(row.asset, meta.snapshotPrice);
+      }
+    } catch {}
+  }
+
   const txHoldings: Holding[] = txRows.map((r) => ({
     account: r.account,
     asset: r.asset,
     balance: r.balance,
     costBasis: r.cost_basis > 0 ? r.cost_basis : null,
     txCount: r.tx_count,
+    snapshotPrice: snapshotPrices.get(r.asset) ?? null,
   }));
 
   // Add manual balances (bank accounts, etc.)
@@ -140,8 +160,9 @@ export function getHoldings(): Holding[] {
     account: r.account,
     asset: r.asset,
     balance: r.balance,
-    costBasis: r.asset === 'USD' ? r.balance : null, // cash = cost basis is face value
+    costBasis: r.asset === 'USD' ? r.balance : null,
     txCount: 0,
+    snapshotPrice: null,
   }));
 
   return [...txHoldings, ...manualHoldings];

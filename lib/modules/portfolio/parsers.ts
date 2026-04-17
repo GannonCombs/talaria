@@ -4,7 +4,7 @@
 
 import type { ParsedTransaction } from './holdings';
 
-export type BrokerFormat = 'coinbase' | 'binance' | 'unknown';
+export type BrokerFormat = 'coinbase' | 'binance' | 'fidelity' | 'unknown';
 
 // Simple CSV parser — handles quoted fields with commas inside.
 function parseCsv(text: string): string[][] {
@@ -67,12 +67,17 @@ function parseCsv(text: string): string[][] {
 }
 
 export function detectFormat(csv: string): BrokerFormat {
-  const firstLine = csv.split(/\r?\n/)[0] ?? '';
+  // Strip BOM
+  const clean = csv.replace(/^\uFEFF/, '');
+  const firstLine = clean.split(/\r?\n/)[0] ?? '';
   if (firstLine.includes('Transaction ID') && firstLine.includes('Asset Acquired')) {
     return 'coinbase';
   }
   if (firstLine.includes('Realized Amount For Primary Asset') || firstLine.includes('Realized Amount For Base Asset')) {
     return 'binance';
+  }
+  if (firstLine.includes('Account Number') && firstLine.includes('Symbol') && firstLine.includes('Cost Basis Total')) {
+    return 'fidelity';
   }
   return 'unknown';
 }
@@ -293,12 +298,162 @@ export function parseBinance(csv: string): ParsedTransaction[] {
   return out;
 }
 
+// ── Fidelity parser ─────────────────────────────────────────────────────
+
+// Fidelity exports a snapshot of current positions, not transaction history.
+// Each row is a current holding. We create synthetic "snapshot" transactions
+// with the current quantity and cost basis.
+
+export function parseFidelity(csv: string): { transactions: ParsedTransaction[]; accountName: string } {
+  // Strip BOM and disclaimer footer
+  const clean = csv.replace(/^\uFEFF/, '');
+  const lines = clean.split(/\r?\n/);
+  // Find where the disclaimer starts (blank line or line starting with ")
+  const dataEnd = lines.findIndex((l, i) => i > 0 && (l.trim() === '' || l.startsWith('"The data')));
+  const dataLines = dataEnd > 0 ? lines.slice(0, dataEnd) : lines;
+
+  const rows = parseCsv(dataLines.join('\n'));
+  if (rows.length < 2) return { transactions: [], accountName: 'Fidelity' };
+
+  const header = rows[0];
+  const idx = (name: string) => header.findIndex((h) => h.trim() === name);
+
+  const iAcctNum = idx('Account Number');
+  const iAcctName = idx('Account Name');
+  const iSymbol = idx('Symbol');
+  const iDesc = idx('Description');
+  const iQty = idx('Quantity');
+  const iPrice = idx('Last Price');
+  const iValue = idx('Current Value');
+  const iCostBasis = idx('Cost Basis Total');
+  const iType = idx('Type');
+
+  if (iSymbol < 0) return { transactions: [], accountName: 'Fidelity' };
+
+  const out: ParsedTransaction[] = [];
+  const accountNames = new Set<string>();
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const symbol = row[iSymbol]?.trim();
+    if (!symbol) continue;
+
+    const acctName = row[iAcctName]?.trim() ?? '';
+    const acctNum = row[iAcctNum]?.trim() ?? '';
+    const desc = row[iDesc]?.trim() ?? '';
+    const qtyStr = row[iQty]?.trim();
+    const priceStr = row[iPrice]?.trim();
+    const valueStr = row[iValue]?.trim().replace(/[$,]/g, '');
+    const costStr = row[iCostBasis]?.trim().replace(/[$,]/g, '');
+    const type = row[iType]?.trim() ?? '';
+
+    // Skip positions with no value (escrow, etc.)
+    if (priceStr === '--' || valueStr === '--') continue;
+
+    const accountLabel = 'Fidelity';
+    accountNames.add(accountLabel);
+
+    // Money market / cash positions (SPAXX**, CORE**)
+    // Money market / cash sweep positions (SPAXX**, CORE**, FCASH**, etc.)
+    // Note: type === 'Cash' means the account type (vs Margin), NOT that it's cash
+    if (symbol.includes('**')) {
+      const value = parseFloat(valueStr || '0');
+      if (value > 0) {
+        out.push({
+          external_id: `fid-${acctNum}-${symbol}`,
+          timestamp: new Date().toISOString(),
+          tx_type: 'snapshot',
+          asset: 'USD',
+          quantity: value,
+          usd_value: value,
+          metadata: { account: accountLabel, symbol, description: desc },
+        });
+      }
+      continue;
+    }
+
+    // Regular positions
+    const qty = parseFloat(qtyStr || '0');
+    const cost = parseFloat(costStr || '0');
+    if (qty === 0) continue;
+
+    // Use description as ticker for numeric fund codes (e.g. 92204E878 → VANGUARD TARGET 2050)
+    let ticker = symbol;
+    if (/^\d/.test(symbol) && desc) {
+      ticker = desc.replace(/\s+(FD|FUND|SHS|SHARES|NEW)$/i, '').trim();
+    }
+
+    // Disambiguate ETF tickers that collide with crypto tickers on CoinGecko.
+    // Fidelity's BTC = Grayscale Bitcoin Mini Trust ETF (~$33), not Bitcoin (~$74K).
+    // Fidelity's ETH = Grayscale Ethereum Staking Mini ETF (~$22), not Ethereum (~$2.3K).
+    // Rename so the prices route sends these to Finnhub (equities) not CoinGecko (crypto).
+    const ETF_RENAMES: Record<string, string> = {
+      BTC: 'BTC-ETF',
+      ETH: 'ETH-ETF',
+    };
+    if (ETF_RENAMES[ticker]) {
+      ticker = ETF_RENAMES[ticker];
+    }
+
+    const price = parseFloat(priceStr?.replace(/[$,]/g, '') || '0');
+    const currentValue = parseFloat(valueStr || '0');
+
+    out.push({
+      external_id: `fid-${acctNum}-${ticker}`,
+      timestamp: new Date().toISOString(),
+      tx_type: 'snapshot',
+      asset: ticker,
+      quantity: qty,
+      usd_value: cost > 0 ? cost : null,
+      metadata: {
+        account: accountLabel,
+        description: desc,
+        type,
+        snapshotPrice: price > 0 ? price : undefined,
+        snapshotValue: currentValue > 0 ? currentValue : undefined,
+      },
+    });
+  }
+
+  // Use the most common account name, or combine them
+  const primaryAccount = accountNames.size === 1
+    ? [...accountNames][0]
+    : 'Fidelity';
+
+  return { transactions: out, accountName: primaryAccount };
+}
+
 // ── Dispatch ────────────────────────────────────────────────────────────
 
-export function parseCsvFile(csv: string): { format: BrokerFormat; transactions: ParsedTransaction[] } {
+export function parseCsvFile(csv: string): {
+  format: BrokerFormat;
+  transactions: ParsedTransaction[];
+  accountName?: string;
+  // For Fidelity: transactions include per-account metadata
+  perAccountTransactions?: Map<string, ParsedTransaction[]>;
+} {
   const format = detectFormat(csv);
   let transactions: ParsedTransaction[] = [];
-  if (format === 'coinbase') transactions = parseCoinbase(csv);
-  else if (format === 'binance') transactions = parseBinance(csv);
-  return { format, transactions };
+  let accountName: string | undefined;
+
+  if (format === 'coinbase') {
+    transactions = parseCoinbase(csv);
+  } else if (format === 'binance') {
+    transactions = parseBinance(csv);
+  } else if (format === 'fidelity') {
+    const result = parseFidelity(csv);
+    transactions = result.transactions;
+    accountName = result.accountName;
+
+    // Group by account for multi-account import
+    const perAccount = new Map<string, ParsedTransaction[]>();
+    for (const tx of transactions) {
+      const acct = (tx.metadata as Record<string, string>)?.account ?? accountName ?? 'Fidelity';
+      if (!perAccount.has(acct)) perAccount.set(acct, []);
+      perAccount.get(acct)!.push(tx);
+    }
+    return { format, transactions, accountName, perAccountTransactions: perAccount };
+  }
+
+  return { format, transactions, accountName };
 }

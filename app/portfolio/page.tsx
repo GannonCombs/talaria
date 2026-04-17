@@ -106,6 +106,7 @@ export default function PortfolioPage() {
     account: string;
     qty: number;
     price: number | null;
+    dailyPct: number | null;
     mktValue: number | null;
     cost: number | null;
   }
@@ -124,18 +125,22 @@ export default function PortfolioPage() {
       // Fetch prices for all unique assets
       const assets = [...new Set(holdings.map((h: { asset: string }) => h.asset))] as string[];
       const pricesRes = await fetch(`/api/portfolio/prices?assets=${assets.join(',')}`);
-      const priceData = pricesRes.ok ? await pricesRes.json() : { prices: {} };
+      const priceData = pricesRes.ok ? await pricesRes.json() : { prices: {}, dailyPcts: {} };
       const prices: Record<string, number> = priceData.prices ?? {};
+      const dailyPcts: Record<string, number> = priceData.dailyPcts ?? {};
 
-      const mapped: RealHolding[] = holdings.map((h: { asset: string; account: string; balance: number; costBasis: number | null }) => {
-        const price = prices[h.asset] ?? null;
+      const mapped: RealHolding[] = holdings.map((h: { asset: string; account: string; balance: number; costBasis: number | null; snapshotPrice: number | null }) => {
+        const finnhubPrice = prices[h.asset] ?? null;
         const isStable = h.asset === 'USD' || h.asset === 'USDC' || h.asset === 'USDT';
+        // Use Finnhub price, fall back to snapshot price from CSV import
+        const price = isStable ? 1 : (finnhubPrice ?? h.snapshotPrice ?? null);
         const mktValue = isStable ? h.balance : (price != null ? h.balance * price : null);
         return {
           ticker: h.asset,
           account: h.account,
           qty: h.balance,
-          price: isStable ? 1 : price,
+          price,
+          dailyPct: dailyPcts[h.asset] ?? null,
           mktValue,
           cost: h.costBasis,
         };
@@ -211,7 +216,7 @@ export default function PortfolioPage() {
           qty: h.qty as number | null,
           unit: h.ticker === 'USD' ? '' : h.ticker,
           price: h.price,
-          dailyPct: null as number | null,
+          dailyPct: h.dailyPct,
           mktValue,
           cost: h.cost,
           returnAmt,
@@ -291,19 +296,28 @@ export default function PortfolioPage() {
 
   // Real allocation for donut (group by asset type)
   const STABLECOINS = new Set(['USD', 'USDC', 'USDT']);
+  const CRYPTO_TICKERS = new Set([
+    'BTC', 'ETH', 'SOL', 'ATOM', 'LINK', 'UNI', 'XLM', 'AAVE', 'ALGO',
+    'COMP', 'FIL', 'GRT', 'IMX', 'LPT', 'SNX', 'ZRX', 'ICP', 'RNDR',
+    'JTO', 'POL', 'ALCX', 'CGLD', 'FORTH', 'MIR', 'OXT', 'RARI', 'UMA',
+    'NU', 'ETH2', 'MATIC', 'ADA', 'BNB', 'XRP', 'DOT', 'AVAX', 'DOGE',
+  ]);
+  const ALLOC_COLORS: Record<string, string> = { Stocks: '#46f1c5', Crypto: '#22d3ee', Cash: '#8b949e' };
   const realAllocation = useMemo(() => {
     if (!hasRealData || totalValue <= 0) return null;
-    const groups: Record<string, number> = { Crypto: 0, Cash: 0 };
+    const groups: Record<string, number> = {};
     for (const h of holdingsWithAlloc) {
-      if (STABLECOINS.has(h.ticker)) groups['Cash'] = (groups['Cash'] ?? 0) + (h.mktValue ?? 0);
-      else groups['Crypto'] = (groups['Crypto'] ?? 0) + (h.mktValue ?? 0);
+      const cls = STABLECOINS.has(h.ticker) ? 'Cash'
+        : CRYPTO_TICKERS.has(h.ticker) ? 'Crypto'
+        : 'Stocks';
+      groups[cls] = (groups[cls] ?? 0) + (h.mktValue ?? 0);
     }
     const alloc = Object.entries(groups)
       .filter(([, v]) => v > 0)
       .map(([label, value]) => ({
         label,
         pct: Math.round((value / totalValue) * 100),
-        color: label === 'Crypto' ? '#22d3ee' : label === 'Cash' ? '#8b949e' : '#46f1c5',
+        color: ALLOC_COLORS[label] ?? '#ef4444',
       }))
       .sort((a, b) => b.pct - a.pct);
     return alloc;
@@ -769,7 +783,7 @@ export default function PortfolioPage() {
             )}
           </>
         ) : activeTab === 'Allocation' ? (
-          DEMO_MODE ? <AllocationView /> : <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm">No allocation data</div>
+          <AllocationView holdings={hasRealData ? displayHoldings.map((h) => ({ ticker: h.ticker, account: h.account, mktValue: h.mktValue ?? null })) : undefined} />
         ) : activeTab === 'Performance' ? (
           DEMO_MODE ? <PerformanceView /> : <div className="flex items-center justify-center h-48 text-on-surface-variant text-sm">No performance data</div>
         ) : (
