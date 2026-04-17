@@ -12,6 +12,7 @@ export interface DashboardMetrics {
   }>;
   sparkline?: number[];
   customContent?: string;
+  customData?: Record<string, unknown>;
 }
 
 export interface SettingsField {
@@ -77,20 +78,66 @@ registerModule({
   name: 'Portfolio',
   icon: 'PieChart',
   route: '/portfolio',
-  services: ['Alpha Vantage', 'Kraken'],
-  getDashboardMetrics: async () => ({
-    primary: {
-      label: 'Net Capital',
-      value: DEMO_MODE ? '$1,248,392' : '$—',
-      trend: DEMO_MODE ? '+0.8% Δ' : undefined,
-      trendDirection: DEMO_MODE ? ('up' as const) : undefined,
-    },
-    secondary: [
-      { label: 'Equities', value: DEMO_MODE ? '70%' : '—' },
-      { label: 'Crypto', value: DEMO_MODE ? '25%' : '—' },
-    ],
-    customContent: 'portfolio-donut',
-  }),
+  services: ['Finnhub', 'CoinGecko'],
+  getDashboardMetrics: async () => {
+    if (DEMO_MODE) {
+      return {
+        primary: { label: 'Net Capital', value: '$847,291' },
+        secondary: [
+          { label: 'Equities', value: '45%' },
+          { label: 'Crypto', value: '20%' },
+        ],
+        customContent: 'portfolio-donut',
+        customData: {
+          totalValue: '$847,291',
+          segments: [
+            { label: 'Stocks', pct: 45, color: '#46f1c5' },
+            { label: 'Crypto', pct: 20, color: '#22d3ee' },
+            { label: 'Cash', pct: 15, color: '#8b949e' },
+            { label: 'Bonds', pct: 10, color: '#3b82f6' },
+            { label: 'RE', pct: 7, color: '#f59e0b' },
+            { label: 'Other', pct: 3, color: '#ef4444' },
+          ],
+          equityPct: '45%',
+          cryptoPct: '20%',
+        },
+      };
+    }
+
+    // Read cached values that the portfolio page persists after computing
+    // with live prices. No recomputation here — single source of truth.
+    const { getDb } = await import('./db');
+    const db = getDb();
+    const getPref = (key: string): string | null => {
+      const row = db.prepare('SELECT value FROM user_preferences WHERE key = ?').get(key) as { value: string } | undefined;
+      return row?.value ?? null;
+    };
+
+    const total = getPref('portfolio.cached_total');
+    const equityPct = getPref('portfolio.cached_equity_pct');
+    const cryptoPct = getPref('portfolio.cached_crypto_pct');
+    const segmentsJson = getPref('portfolio.cached_segments');
+
+    let segments: Array<{ label: string; pct: number; color: string }> = [];
+    if (segmentsJson) {
+      try { segments = JSON.parse(segmentsJson); } catch {}
+    }
+
+    return {
+      primary: { label: 'Net Capital', value: total ?? '$—' },
+      secondary: [
+        { label: 'Equities', value: equityPct ?? '—' },
+        { label: 'Crypto', value: cryptoPct ?? '—' },
+      ],
+      customContent: 'portfolio-donut',
+      customData: {
+        totalValue: total ?? '$—',
+        segments,
+        equityPct: equityPct ?? '—',
+        cryptoPct: cryptoPct ?? '—',
+      },
+    };
+  },
   getTables: () => [],
 });
 

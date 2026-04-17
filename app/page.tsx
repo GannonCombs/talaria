@@ -14,7 +14,7 @@ import TransactionTable, {
 } from '@/components/dashboard/TransactionTable';
 import { getRegisteredModules, type DashboardMetrics } from '@/lib/modules';
 import { getDb } from '@/lib/db';
-import { DEMO_MODE } from '@/lib/config';
+
 
 // Force dynamic rendering — dashboard reads live DB data
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 // ── Custom content components (keyed by DashboardMetrics.customContent) ──
 
-function PortfolioDonut() {
+function PortfolioDonut({ data }: { data?: Record<string, unknown> }) {
+  const totalValue = (data?.totalValue as string) ?? '$—';
+  const segments = (data?.segments as Array<{ label: string; pct: number; color: string }>) ?? [];
+
+  let offset = 0;
+
   return (
     <div className="flex items-center gap-6 my-2">
       <div className="relative w-16 h-16">
@@ -45,30 +50,28 @@ function PortfolioDonut() {
             r="16"
             strokeWidth="4"
           />
-          <circle
-            className="stroke-primary"
-            cx="18"
-            cy="18"
-            fill="none"
-            r="16"
-            strokeDasharray="70 100"
-            strokeWidth="4"
-          />
-          <circle
-            className="stroke-secondary"
-            cx="18"
-            cy="18"
-            fill="none"
-            r="16"
-            strokeDasharray="25 100"
-            strokeDashoffset="-70"
-            strokeWidth="4"
-          />
+          {segments.map((seg) => {
+            const el = (
+              <circle
+                key={seg.label}
+                cx="18"
+                cy="18"
+                fill="none"
+                r="16"
+                stroke={seg.color}
+                strokeDasharray={`${seg.pct} 100`}
+                strokeDashoffset={-offset}
+                strokeWidth="4"
+              />
+            );
+            offset += seg.pct;
+            return el;
+          })}
         </svg>
       </div>
       <div>
         <div className="font-mono text-2xl font-bold text-white tracking-tighter">
-          {DEMO_MODE ? '$1,248,392' : '$—'}
+          {totalValue}
         </div>
         <div className="text-[10px] text-on-surface-variant font-mono uppercase">
           Total Net Capital
@@ -78,20 +81,23 @@ function PortfolioDonut() {
   );
 }
 
-function PortfolioSecondaryMetrics() {
+function PortfolioSecondaryMetrics({ data }: { data?: Record<string, unknown> }) {
+  const equityPct = (data?.equityPct as string) ?? '—';
+  const cryptoPct = (data?.cryptoPct as string) ?? '—';
+
   return (
     <div className="grid grid-cols-2 gap-3 mt-2">
       <div className="bg-background p-2 border border-outline">
         <div className="text-[9px] text-on-surface-variant section-header">
           Equities
         </div>
-        <div className="font-mono text-xs text-white">{DEMO_MODE ? '70%' : '—'}</div>
+        <div className="font-mono text-xs text-white">{equityPct}</div>
       </div>
       <div className="bg-background p-2 border border-outline">
         <div className="text-[9px] text-on-surface-variant section-header">
           Crypto
         </div>
-        <div className="font-mono text-xs text-white">{DEMO_MODE ? '25%' : '—'}</div>
+        <div className="font-mono text-xs text-white">{cryptoPct}</div>
       </div>
     </div>
   );
@@ -124,15 +130,21 @@ function FoodCardContent() {
   );
 }
 
-const CUSTOM_CONTENT_MAP: Record<string, React.ReactNode> = {
-  'portfolio-donut': (
-    <>
-      <PortfolioDonut />
-      <PortfolioSecondaryMetrics />
-    </>
-  ),
-  'food-reorder': <FoodCardContent />,
-};
+function renderCustomContent(key: string, data?: Record<string, unknown>): React.ReactNode {
+  switch (key) {
+    case 'portfolio-donut':
+      return (
+        <>
+          <PortfolioDonut data={data} />
+          <PortfolioSecondaryMetrics data={data} />
+        </>
+      );
+    case 'food-reorder':
+      return <FoodCardContent />;
+    default:
+      return null;
+  }
+}
 
 // ── Dashboard page ──
 
@@ -243,7 +255,7 @@ export default async function Dashboard() {
             }
             customContent={
               mod.metrics.customContent
-                ? CUSTOM_CONTENT_MAP[mod.metrics.customContent]
+                ? renderCustomContent(mod.metrics.customContent, mod.metrics.customData)
                 : undefined
             }
           />

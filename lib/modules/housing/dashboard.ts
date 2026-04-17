@@ -4,8 +4,26 @@ import { getDb } from '@/lib/db';
 import type { DashboardMetrics } from '@/lib/modules';
 import { fetchFedPredictions } from './predictions';
 import { getLatestRate } from './bankrate';
+import { DEMO_MODE } from '@/lib/config';
 
 export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
+  if (DEMO_MODE) {
+    return {
+      primary: {
+        label: 'Austin Median Price',
+        value: '$415K',
+        trend: '↓2.1% (90d)',
+        trendDirection: 'down',
+      },
+      secondary: [
+        { label: 'Best 30yr', value: '6.12%', valueColor: 'text-primary' },
+        { label: 'Fed Cut', value: '62%', valueColor: 'text-secondary' },
+        { label: 'Fed Hike', value: '4%', valueColor: 'text-tertiary' },
+      ],
+      sparkline: [440, 435, 430, 428, 425, 422, 420, 418, 416, 415, 414, 415],
+    };
+  }
+
   const db = getDb();
 
   const cityRow = db

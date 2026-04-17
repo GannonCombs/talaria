@@ -193,7 +193,7 @@ export default function PortfolioPage() {
     }
   }, []);
 
-  useEffect(() => { loadRealHoldings(); }, [loadRealHoldings]);
+  useEffect(() => { if (!DEMO_MODE) loadRealHoldings(); }, [loadRealHoldings]);
 
   // Derived values from real holdings
   const hasRealData = realHoldings.length > 0;
@@ -375,6 +375,24 @@ export default function PortfolioPage() {
     return alloc;
   }, [holdingsWithAlloc, hasRealData, totalValue]);
 
+  // Persist computed portfolio values so the dashboard card can display them
+  // without recomputing. Only fires when real (non-demo) values are available.
+  useEffect(() => {
+    if (!hasRealData || netWorth == null || DEMO_MODE) return;
+    const equityPct = realAllocation?.find((s) => s.label === 'Stocks')?.pct ?? 0;
+    const cryptoPct = realAllocation?.find((s) => s.label === 'Crypto')?.pct ?? 0;
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        'portfolio.cached_total': `$${fmt(netWorth, 0)}`,
+        'portfolio.cached_equity_pct': `${equityPct}%`,
+        'portfolio.cached_crypto_pct': `${cryptoPct}%`,
+        'portfolio.cached_segments': JSON.stringify(realAllocation ?? []),
+      }),
+    }).catch(() => {});
+  }, [netWorth, realAllocation, hasRealData]);
+
   const accountCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const h of displayHoldings) {
@@ -551,7 +569,7 @@ export default function PortfolioPage() {
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-6 w-full text-[10px] text-on-surface-variant">
-            {(realAllocation ?? (DEMO_MODE ? ALLOCATION : [])).slice(0, 3).map((seg) => (
+            {(realAllocation ?? (DEMO_MODE ? ALLOCATION : [])).map((seg) => (
               <div key={seg.label} className="flex items-center gap-1.5">
                 <div className="w-2 h-2" style={{ backgroundColor: seg.color }} />
                 {seg.label.toUpperCase()}
