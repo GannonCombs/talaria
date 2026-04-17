@@ -115,38 +115,79 @@ export default function PortfolioPage() {
   const [cashAccountName, setCashAccountName] = useState('');
   const [cashBalance, setCashBalance] = useState('');
 
+  // Unvested / restricted holdings (RSUs, restricted ESPP lots)
+  interface UnvestedHoldingUI {
+    ticker: string;
+    account: string;
+    qty: number;
+    price: number | null;
+    mktValue: number | null;
+    grants: Array<{ grantDate: string; units: number; vestingDate: string | null; source: string }>;
+  }
+  const [unvestedHoldings, setUnvestedHoldings] = useState<UnvestedHoldingUI[]>([]);
+  const [includeUnvested, setIncludeUnvested] = useState(false);
+
+  // Price cache — persists across loadRealHoldings calls so we don't
+  // re-fetch prices for assets we already have (e.g. second PDF upload).
+  const priceCache = useRef<Record<string, number>>({});
+  const dailyPctCache = useRef<Record<string, number>>({});
+
   const loadRealHoldings = useCallback(async () => {
     try {
       const holdingsRes = await fetch('/api/portfolio/holdings');
       if (!holdingsRes.ok) return;
-      const { holdings } = await holdingsRes.json();
-      if (!holdings || holdings.length === 0) return;
+      const { holdings, unvested } = await holdingsRes.json();
 
-      // Fetch prices for all unique assets
-      const assets = [...new Set(holdings.map((h: { asset: string }) => h.asset))] as string[];
-      const pricesRes = await fetch(`/api/portfolio/prices?assets=${assets.join(',')}`);
-      const priceData = pricesRes.ok ? await pricesRes.json() : { prices: {}, dailyPcts: {} };
-      const prices: Record<string, number> = priceData.prices ?? {};
-      const dailyPcts: Record<string, number> = priceData.dailyPcts ?? {};
+      // Collect all assets needing prices (from both liquid and unvested)
+      const liquidAssets = (holdings ?? []).map((h: { asset: string }) => h.asset);
+      const unvestedAssets = (unvested ?? []).map((h: { asset: string }) => h.asset);
+      const allAssets = [...new Set([...liquidAssets, ...unvestedAssets])] as string[];
+      const uncachedAssets = allAssets.filter((a) => !(a in priceCache.current));
 
-      const mapped: RealHolding[] = holdings.map((h: { asset: string; account: string; balance: number; costBasis: number | null; snapshotPrice: number | null }) => {
-        const finnhubPrice = prices[h.asset] ?? null;
-        const isStable = h.asset === 'USD' || h.asset === 'USDC' || h.asset === 'USDT';
-        // Use Finnhub price, fall back to snapshot price from CSV import
-        const price = isStable ? 1 : (finnhubPrice ?? h.snapshotPrice ?? null);
-        const mktValue = isStable ? h.balance : (price != null ? h.balance * price : null);
-        return {
-          ticker: h.asset,
-          account: h.account,
-          qty: h.balance,
-          price,
-          dailyPct: dailyPcts[h.asset] ?? null,
-          mktValue,
-          cost: h.costBasis,
-        };
-      });
+      if (uncachedAssets.length > 0) {
+        const pricesRes = await fetch(`/api/portfolio/prices?assets=${uncachedAssets.join(',')}`);
+        const priceData = pricesRes.ok ? await pricesRes.json() : { prices: {}, dailyPcts: {} };
+        Object.assign(priceCache.current, priceData.prices ?? {});
+        Object.assign(dailyPctCache.current, priceData.dailyPcts ?? {});
+      }
 
-      setRealHoldings(mapped);
+      // Map liquid holdings
+      if (holdings && holdings.length > 0) {
+        const mapped: RealHolding[] = holdings.map((h: { asset: string; account: string; balance: number; costBasis: number | null; snapshotPrice: number | null }) => {
+          const cachedPrice = priceCache.current[h.asset] ?? null;
+          const isStable = h.asset === 'USD' || h.asset === 'USDC' || h.asset === 'USDT';
+          const price = isStable ? 1 : (cachedPrice ?? h.snapshotPrice ?? null);
+          const mktValue = isStable ? h.balance : (price != null ? h.balance * price : null);
+          return {
+            ticker: h.asset,
+            account: h.account,
+            qty: h.balance,
+            price,
+            dailyPct: dailyPctCache.current[h.asset] ?? null,
+            mktValue,
+            cost: h.costBasis,
+          };
+        });
+        setRealHoldings(mapped);
+      }
+
+      // Map unvested holdings
+      if (unvested && unvested.length > 0) {
+        const mapped: UnvestedHoldingUI[] = unvested.map((h: { asset: string; account: string; balance: number; snapshotPrice: number | null; grants: Array<{ grantDate: string; units: number; vestingDate: string | null; source: string }> }) => {
+          const cachedPrice = priceCache.current[h.asset] ?? null;
+          const price = cachedPrice ?? h.snapshotPrice ?? null;
+          const mktValue = price != null ? h.balance * price : null;
+          return {
+            ticker: h.asset,
+            account: h.account,
+            qty: h.balance,
+            price,
+            mktValue,
+            grants: h.grants,
+          };
+        });
+        setUnvestedHoldings(mapped);
+      }
     } catch {
       // Silent fail — dashes remain
     }
@@ -156,10 +197,21 @@ export default function PortfolioPage() {
 
   // Derived values from real holdings
   const hasRealData = realHoldings.length > 0;
-  const netWorth = useMemo(() => {
+  const liquidValue = useMemo(() => {
     if (!hasRealData) return null;
     return realHoldings.reduce((sum, h) => sum + (h.mktValue ?? 0), 0);
   }, [realHoldings, hasRealData]);
+
+  const unvestedValue = useMemo(() => {
+    if (unvestedHoldings.length === 0) return null;
+    return unvestedHoldings.reduce((sum, h) => sum + (h.mktValue ?? 0), 0);
+  }, [unvestedHoldings]);
+
+  const netWorth = useMemo(() => {
+    if (liquidValue == null) return null;
+    if (includeUnvested && unvestedValue != null) return liquidValue + unvestedValue;
+    return liquidValue;
+  }, [liquidValue, unvestedValue, includeUnvested]);
 
   const totalInvested = useMemo(() => {
     if (!hasRealData) return null;
@@ -404,10 +456,30 @@ export default function PortfolioPage() {
         <div className="col-span-12 lg:col-span-8 bg-surface-container-low border border-outline p-6 relative overflow-hidden">
           <div className="flex justify-between items-start mb-8 relative z-10">
             <div>
-              <p className="text-[10px] text-on-surface-variant section-header mb-1">Net Worth</p>
+              <div className="flex items-center gap-3 mb-1">
+                <p className="text-[10px] text-on-surface-variant section-header">Net Worth</p>
+                {unvestedValue != null && unvestedValue > 0 && (
+                  <button
+                    onClick={() => setIncludeUnvested((v) => !v)}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold transition-colors duration-75 border ${
+                      includeUnvested
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-outline text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full ${includeUnvested ? 'bg-primary' : 'bg-on-surface-variant/40'}`} />
+                    {includeUnvested ? 'Incl. unvested' : '+ Unvested'}
+                  </button>
+                )}
+              </div>
               <h3 className="text-4xl font-mono text-primary font-bold tracking-tight">
                 {netWorth != null ? `$${fmt(netWorth, 2)}` : (DEMO_MODE ? '$847,291.44' : '$—')}
               </h3>
+              {unvestedValue != null && unvestedValue > 0 && !includeUnvested && (
+                <p className="text-xs text-on-surface-variant font-mono mt-1">
+                  +${fmt(unvestedValue, 2)} unvested
+                </p>
+              )}
             </div>
             <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 font-mono">
               {totalReturn != null && totalInvested != null && totalInvested > 0
@@ -564,12 +636,12 @@ export default function PortfolioPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition-colors duration-75"
             >
               <Upload size={14} strokeWidth={2} />
-              Import CSV
+              Import
             </button>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".csv,.pdf"
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -767,6 +839,55 @@ export default function PortfolioPage() {
                       </td>
                     </tr>
                   ))}
+                  {/* Unvested / restricted rows */}
+                  {unvestedHoldings.length > 0 && (
+                    <>
+                      <tr>
+                        <td colSpan={9} className="px-4 py-2 bg-surface-container-lowest border-t border-outline">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                            Unvested / Restricted
+                          </span>
+                        </td>
+                      </tr>
+                      {unvestedHoldings.map((h) => (
+                        <tr key={`unvested-${h.account}-${h.ticker}`} className="opacity-50 hover:opacity-80 transition-opacity duration-75">
+                          <td className="p-3 pl-0">
+                            <div className="flex items-stretch gap-0">
+                              <div
+                                className="w-[3px] shrink-0 self-stretch"
+                                style={{ backgroundColor: ACCOUNT_COLORS[h.account] ?? '#8b949e' }}
+                              />
+                              <div className="pl-3">
+                                <div className="font-bold text-on-surface flex items-center gap-2">
+                                  {h.ticker}
+                                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-on-surface-variant/30 text-on-surface-variant">
+                                    Unvested
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-on-surface-variant">
+                                  {h.grants.map((g) => g.source).filter((v, i, a) => a.indexOf(v) === i).join(', ')}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-3 text-on-surface-variant">{h.account}</td>
+                          <td className="p-3 font-mono">
+                            {fmt(h.qty, 0)} <span className="text-on-surface-variant">{h.ticker}</span>
+                          </td>
+                          <td className="p-3 font-mono">
+                            {h.price != null ? `$${fmt(h.price)}` : <span className="text-on-surface-variant">—</span>}
+                          </td>
+                          <td className="p-3 text-right font-mono">
+                            {h.mktValue != null ? `$${fmt(h.mktValue, 0)}` : '—'}
+                          </td>
+                          <td className="p-3 text-right font-mono text-on-surface-variant">—</td>
+                          <td className="p-3 text-right font-mono text-on-surface-variant">—</td>
+                          <td className="p-3 text-right font-mono text-on-surface-variant">—</td>
+                          <td className="p-3 text-on-surface-variant">—</td>
+                        </tr>
+                      ))}
+                    </>
+                  )}
                 </tbody>
 
               </table>

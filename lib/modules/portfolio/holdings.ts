@@ -97,10 +97,34 @@ export function setManualBalance(accountId: number, asset: string, balance: numb
 
 // ── Compute holdings ────────────────────────────────────────────────────
 
+// Transaction types that represent value you don't fully control yet.
+const UNVESTED_TX_TYPES = new Set(['rsu']);
+
+function getSnapshotPrices(): Map<string, number> {
+  const db = getDb();
+  const snapshotRows = db.prepare(`
+    SELECT asset, metadata FROM portfolio_transactions
+    WHERE tx_type = 'snapshot' AND metadata IS NOT NULL
+    ORDER BY timestamp DESC
+  `).all() as Array<{ asset: string; metadata: string }>;
+
+  const prices = new Map<string, number>();
+  for (const row of snapshotRows) {
+    if (prices.has(row.asset)) continue; // keep most recent
+    try {
+      const meta = JSON.parse(row.metadata);
+      if (meta.snapshotPrice && typeof meta.snapshotPrice === 'number') {
+        prices.set(row.asset, meta.snapshotPrice);
+      }
+    } catch {}
+  }
+  return prices;
+}
+
 export function getHoldings(): Holding[] {
   const db = getDb();
 
-  // Sum quantities per (account, asset), also grab cost basis (sum of positive usd_value)
+  // Sum quantities per (account, asset), excluding unvested tx types
   const txRows = db.prepare(`
     SELECT
       a.name as account,
@@ -110,6 +134,8 @@ export function getHoldings(): Holding[] {
       COUNT(*) as tx_count
     FROM portfolio_transactions t
     JOIN portfolio_accounts a ON a.id = t.account_id
+    WHERE t.tx_type NOT IN ('rsu')
+      AND (t.metadata IS NULL OR json_extract(t.metadata, '$.restricted') IS NULL)
     GROUP BY t.account_id, t.asset
     HAVING ABS(SUM(t.quantity)) > 0.000001
     ORDER BY a.name, t.asset
@@ -121,23 +147,7 @@ export function getHoldings(): Holding[] {
     tx_count: number;
   }>;
 
-  // Extract snapshot prices from metadata (for assets Finnhub can't price)
-  const snapshotRows = db.prepare(`
-    SELECT asset, metadata FROM portfolio_transactions
-    WHERE tx_type = 'snapshot' AND metadata IS NOT NULL
-    ORDER BY timestamp DESC
-  `).all() as Array<{ asset: string; metadata: string }>;
-
-  const snapshotPrices = new Map<string, number>();
-  for (const row of snapshotRows) {
-    if (snapshotPrices.has(row.asset)) continue; // keep most recent
-    try {
-      const meta = JSON.parse(row.metadata);
-      if (meta.snapshotPrice && typeof meta.snapshotPrice === 'number') {
-        snapshotPrices.set(row.asset, meta.snapshotPrice);
-      }
-    } catch {}
-  }
+  const snapshotPrices = getSnapshotPrices();
 
   const txHoldings: Holding[] = txRows.map((r) => ({
     account: r.account,
@@ -166,4 +176,96 @@ export function getHoldings(): Holding[] {
   }));
 
   return [...txHoldings, ...manualHoldings];
+}
+
+// ── Unvested / restricted holdings ─────────────────────────────────────
+
+export interface UnvestedHolding {
+  account: string;
+  asset: string;
+  balance: number;
+  snapshotPrice: number | null;
+  grants: Array<{
+    grantDate: string;
+    units: number;
+    vestingDate: string | null;
+    source: string;
+  }>;
+}
+
+export function getUnvestedHoldings(): UnvestedHolding[] {
+  const db = getDb();
+
+  // Unvested RSU grants
+  const rsuRows = db.prepare(`
+    SELECT
+      a.name as account,
+      t.asset,
+      t.quantity,
+      t.timestamp,
+      t.metadata
+    FROM portfolio_transactions t
+    JOIN portfolio_accounts a ON a.id = t.account_id
+    WHERE t.tx_type = 'rsu'
+    ORDER BY t.timestamp
+  `).all() as Array<{
+    account: string;
+    asset: string;
+    quantity: number;
+    timestamp: string;
+    metadata: string | null;
+  }>;
+
+  // Restricted ESPP/vest lots
+  const restrictedRows = db.prepare(`
+    SELECT
+      a.name as account,
+      t.asset,
+      t.quantity,
+      t.timestamp,
+      t.metadata
+    FROM portfolio_transactions t
+    JOIN portfolio_accounts a ON a.id = t.account_id
+    WHERE t.metadata IS NOT NULL
+      AND json_extract(t.metadata, '$.restricted') IS NOT NULL
+    ORDER BY t.timestamp
+  `).all() as Array<{
+    account: string;
+    asset: string;
+    quantity: number;
+    timestamp: string;
+    metadata: string | null;
+  }>;
+
+  const snapshotPrices = getSnapshotPrices();
+
+  // Group by (account, asset)
+  const grouped = new Map<string, UnvestedHolding>();
+
+  for (const row of [...rsuRows, ...restrictedRows]) {
+    const key = `${row.account}::${row.asset}`;
+    let meta: Record<string, unknown> = {};
+    try { meta = row.metadata ? JSON.parse(row.metadata) : {}; } catch {}
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        account: row.account,
+        asset: row.asset,
+        balance: 0,
+        snapshotPrice: snapshotPrices.get(row.asset) ?? (typeof meta.snapshotPrice === 'number' ? meta.snapshotPrice : null),
+        grants: [],
+      });
+    }
+
+    const holding = grouped.get(key)!;
+    holding.balance += row.quantity;
+    holding.grants.push({
+      grantDate: row.timestamp,
+      units: row.quantity,
+      vestingDate: typeof meta.vestingDate === 'string' ? meta.vestingDate : null,
+      source: typeof meta.source === 'string' ? meta.source : 'Unvested',
+    });
+  }
+
+  return [...grouped.values()];
 }

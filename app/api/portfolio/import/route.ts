@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseCsvFile } from '@/lib/modules/portfolio/parsers';
+import { parseMerrillPdf } from '@/lib/modules/portfolio/pdf-parser';
 import { getOrCreateAccount, insertTransactions } from '@/lib/modules/portfolio/holdings';
 
-// POST: upload a CSV file. Body can be:
-//   - multipart/form-data with 'file' field, or
-//   - JSON with { csv: '...', accountName?: 'Coinbase' }
+// POST: upload a CSV or PDF file.
 export async function POST(request: NextRequest) {
-  let csv: string;
+  let csv: string | null = null;
+  let pdfBuffer: Buffer | null = null;
   let accountNameOverride: string | undefined;
+  let fileName = '';
 
   const contentType = request.headers.get('content-type') ?? '';
 
@@ -21,15 +22,54 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
-    csv = await file.text();
+    fileName = file.name.toLowerCase();
     const name = form.get('accountName');
     if (typeof name === 'string') accountNameOverride = name;
+
+    // Detect PDF vs CSV by extension or content type
+    if (fileName.endsWith('.pdf') || file.type === 'application/pdf') {
+      const arrayBuffer = await file.arrayBuffer();
+      pdfBuffer = Buffer.from(arrayBuffer);
+    } else {
+      csv = await file.text();
+    }
   } else {
     return NextResponse.json({ error: 'Unsupported content type' }, { status: 400 });
   }
 
+  // ── PDF import path ──
+  if (pdfBuffer) {
+    try {
+      const result = await parseMerrillPdf(pdfBuffer);
+      if (result.transactions.length === 0) {
+        return NextResponse.json(
+          { error: 'No positions found in PDF. Supported: Merrill ESPP, RSU, Vested Shares.' },
+          { status: 400 }
+        );
+      }
+      const accountName = accountNameOverride ?? result.accountName;
+      const accountId = getOrCreateAccount(accountName, 'brokerage');
+      const inserted = insertTransactions(accountId, result.transactions);
+      return NextResponse.json({
+        ok: true,
+        format: `merrill-${result.documentType}`,
+        accountName,
+        parsedRows: result.transactions.length,
+        insertedRows: inserted,
+        duplicatesSkipped: result.transactions.length - inserted,
+      });
+    } catch (err) {
+      console.error('[PDF import error]', err);
+      return NextResponse.json(
+        { error: 'PDF parsing failed', detail: (err as Error).message, stack: (err as Error).stack?.split('\n').slice(0, 3) },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ── CSV import path ──
   if (!csv || typeof csv !== 'string') {
-    return NextResponse.json({ error: 'CSV content required' }, { status: 400 });
+    return NextResponse.json({ error: 'File content required' }, { status: 400 });
   }
 
   const result = parseCsvFile(csv);
