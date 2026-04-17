@@ -206,61 +206,87 @@ export function parseBinance(csv: string): ParsedTransaction[] {
 
     const txType = op || category.toLowerCase() || 'trade';
 
-    // For Binance, either Base or Quote is USD. The other is crypto.
-    // On Buy: USD goes out (negative), crypto comes in (positive).
-    // On Sell: crypto goes out, USD comes in.
+    // For Binance buys/sells, only record the acquired asset as a holding.
+    // The payment side (USD spent on a buy, or crypto sold) is an expenditure,
+    // not a holding. Cost basis is captured in usd_value.
     const isBuy = op === 'buy';
     const isSell = op === 'sell';
+    const FIAT = new Set(['USD', 'USDT', 'USDC']);
 
-    if (baseAsset && !isNaN(baseAmt) && baseAmt !== 0) {
-      // Determine sign: if this side is the crypto being bought, positive; if USD/quote being sold, depends.
-      let quantity = baseAmt;
-      if (baseAsset === 'USD' || baseAsset === 'USDT' || baseAsset === 'USDC') {
-        // Base is fiat — on Buy we're selling fiat (negative), on Sell we're receiving fiat (positive)
-        quantity = isBuy ? -baseAmt : baseAmt;
+    if (isBuy || isSell) {
+      // Figure out which side is the acquired asset
+      const baseIsFiat = FIAT.has(baseAsset ?? '');
+      const quoteIsFiat = FIAT.has(quoteAsset ?? '');
+
+      // On Buy: the non-fiat side is acquired. On Sell: the fiat side is received.
+      if (isBuy) {
+        // Record the crypto we received
+        const cryptoAsset = baseIsFiat ? quoteAsset : baseAsset;
+        const cryptoAmt = baseIsFiat ? quoteAmt : baseAmt;
+        const costUsd = baseIsFiat ? baseUsd : quoteUsd;
+        if (cryptoAsset && !isNaN(cryptoAmt) && cryptoAmt !== 0) {
+          out.push({
+            external_id: txId,
+            timestamp,
+            tx_type: 'buy',
+            asset: cryptoAsset,
+            quantity: cryptoAmt,
+            usd_value: isNaN(costUsd) ? null : costUsd,
+          });
+        }
       } else {
-        // Base is crypto — on Buy we receive it (positive), on Sell we send it (negative)
-        quantity = isSell ? -baseAmt : baseAmt;
+        // Sell: record the fiat received as a deposit, and the crypto loss
+        const cryptoAsset = baseIsFiat ? quoteAsset : baseAsset;
+        const cryptoAmt = baseIsFiat ? quoteAmt : baseAmt;
+        if (cryptoAsset && !isNaN(cryptoAmt) && cryptoAmt !== 0) {
+          out.push({
+            external_id: txId,
+            timestamp,
+            tx_type: 'sell',
+            asset: cryptoAsset,
+            quantity: -cryptoAmt,
+            usd_value: null,
+          });
+        }
       }
-      out.push({
-        external_id: txId,
-        timestamp,
-        tx_type: txType,
-        asset: baseAsset,
-        quantity,
-        usd_value: isNaN(baseUsd) ? null : baseUsd,
-      });
+    } else {
+      // Non-buy/sell operations (deposit, withdraw, etc.) — record both sides
+      if (baseAsset && !isNaN(baseAmt) && baseAmt !== 0) {
+        out.push({
+          external_id: txId,
+          timestamp,
+          tx_type: txType,
+          asset: baseAsset,
+          quantity: baseAmt,
+          usd_value: isNaN(baseUsd) ? null : baseUsd,
+        });
+      }
+      if (quoteAsset && !isNaN(quoteAmt) && quoteAmt !== 0) {
+        out.push({
+          external_id: txId,
+          timestamp,
+          tx_type: txType,
+          asset: quoteAsset,
+          quantity: quoteAmt,
+          usd_value: isNaN(quoteUsd) ? null : quoteUsd,
+        });
+      }
     }
 
-    if (quoteAsset && !isNaN(quoteAmt) && quoteAmt !== 0) {
-      let quantity = quoteAmt;
-      if (quoteAsset === 'USD' || quoteAsset === 'USDT' || quoteAsset === 'USDC') {
-        // Quote is fiat — on Buy we spend it (negative), on Sell we receive it (positive)
-        quantity = isBuy ? -quoteAmt : quoteAmt;
-      } else {
-        // Quote is crypto — on Buy we send it, on Sell we receive it
-        quantity = isBuy ? -quoteAmt : quoteAmt;
-      }
-      out.push({
-        external_id: txId,
-        timestamp,
-        tx_type: txType,
-        asset: quoteAsset,
-        quantity,
-        usd_value: isNaN(quoteUsd) ? null : quoteUsd,
-      });
-    }
-
-    // Fee (always a reduction in the fee asset balance)
+    // Fee — reduces the fee asset balance. Skip fiat fees on buys
+    // (those are expenditures, not holding reductions).
     if (feeAsset && !isNaN(feeAmt) && feeAmt !== 0) {
-      out.push({
-        external_id: txId + '-fee',
-        timestamp,
-        tx_type: 'fee',
-        asset: feeAsset,
-        quantity: -feeAmt,
-        usd_value: null,
-      });
+      const feeIsFiat = FIAT.has(feeAsset);
+      if (!(isBuy && feeIsFiat)) {
+        out.push({
+          external_id: txId + '-fee',
+          timestamp,
+          tx_type: 'fee',
+          asset: feeAsset,
+          quantity: -feeAmt,
+          usd_value: null,
+        });
+      }
     }
   }
 

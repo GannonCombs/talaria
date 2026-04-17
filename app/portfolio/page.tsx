@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import BackButton from '@/components/layout/BackButton';
-import { AlertTriangle, ChevronDown, Plus, Upload } from 'lucide-react';
+import { AlertTriangle, Plus, Upload, Landmark } from 'lucide-react';
 import AddPositionDrawer from '@/components/modules/portfolio/AddPositionDrawer';
 import AllocationView from '@/components/modules/portfolio/AllocationView';
 import PerformanceView from '@/components/modules/portfolio/PerformanceView';
@@ -94,8 +94,82 @@ export default function PortfolioPage() {
   const [activeAccount, setActiveAccount] = useState<string>('All');
   const [showAll, setShowAll] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sortField, setSortField] = useState<string>('mktValue');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [combined, setCombined] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Real holdings from DB + live prices from Finnhub
+  interface RealHolding {
+    ticker: string;
+    account: string;
+    qty: number;
+    price: number | null;
+    mktValue: number | null;
+    cost: number | null;
+  }
+  const [realHoldings, setRealHoldings] = useState<RealHolding[]>([]);
+  const [cashFormOpen, setCashFormOpen] = useState(false);
+  const [cashAccountName, setCashAccountName] = useState('');
+  const [cashBalance, setCashBalance] = useState('');
+
+  const loadRealHoldings = useCallback(async () => {
+    try {
+      const holdingsRes = await fetch('/api/portfolio/holdings');
+      if (!holdingsRes.ok) return;
+      const { holdings } = await holdingsRes.json();
+      if (!holdings || holdings.length === 0) return;
+
+      // Fetch prices for all unique assets
+      const assets = [...new Set(holdings.map((h: { asset: string }) => h.asset))] as string[];
+      const pricesRes = await fetch(`/api/portfolio/prices?assets=${assets.join(',')}`);
+      const priceData = pricesRes.ok ? await pricesRes.json() : { prices: {} };
+      const prices: Record<string, number> = priceData.prices ?? {};
+
+      const mapped: RealHolding[] = holdings.map((h: { asset: string; account: string; balance: number; costBasis: number | null }) => {
+        const price = prices[h.asset] ?? null;
+        const isStable = h.asset === 'USD' || h.asset === 'USDC' || h.asset === 'USDT';
+        const mktValue = isStable ? h.balance : (price != null ? h.balance * price : null);
+        return {
+          ticker: h.asset,
+          account: h.account,
+          qty: h.balance,
+          price: isStable ? 1 : price,
+          mktValue,
+          cost: h.costBasis,
+        };
+      });
+
+      setRealHoldings(mapped);
+    } catch {
+      // Silent fail — dashes remain
+    }
+  }, []);
+
+  useEffect(() => { loadRealHoldings(); }, [loadRealHoldings]);
+
+  // Derived values from real holdings
+  const hasRealData = realHoldings.length > 0;
+  const netWorth = useMemo(() => {
+    if (!hasRealData) return null;
+    return realHoldings.reduce((sum, h) => sum + (h.mktValue ?? 0), 0);
+  }, [realHoldings, hasRealData]);
+
+  const totalInvested = useMemo(() => {
+    if (!hasRealData) return null;
+    return realHoldings.reduce((sum, h) => sum + (h.cost ?? 0), 0);
+  }, [realHoldings, hasRealData]);
+
+  const cashPosition = useMemo(() => {
+    if (!hasRealData) return null;
+    return realHoldings
+      .filter((h) => h.ticker === 'USD' || h.ticker === 'USDC' || h.ticker === 'USDT')
+      .reduce((sum, h) => sum + (h.mktValue ?? 0), 0);
+  }, [realHoldings, hasRealData]);
+
+  const totalReturn = netWorth != null && totalInvested != null && totalInvested > 0
+    ? netWorth - totalInvested : null;
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -113,6 +187,7 @@ export default function PortfolioPage() {
         setImportStatus(
           `${data.format}: ${data.insertedRows} new, ${data.duplicatesSkipped} duplicates (${data.accountName})`
         );
+        loadRealHoldings(); // refresh after import
       }
     } catch (err) {
       setImportStatus(`Error: ${(err as Error).message}`);
@@ -121,25 +196,178 @@ export default function PortfolioPage() {
     }
   }
 
+  // When real data exists, derive display rows from it.
+  // When no real data: DEMO_MODE shows dummy HOLDINGS, otherwise empty.
+  const displayHoldings = useMemo(() => {
+    if (hasRealData) {
+      return realHoldings.map((h) => {
+        const mktValue = h.mktValue ?? 0;
+        const returnAmt = h.cost != null && h.mktValue != null ? h.mktValue - h.cost : null;
+        const returnPct = returnAmt != null && h.cost != null && h.cost > 0 ? (returnAmt / h.cost) * 100 : null;
+        return {
+          ticker: h.ticker,
+          type: '',
+          account: h.account,
+          qty: h.qty as number | null,
+          unit: h.ticker === 'USD' ? '' : h.ticker,
+          price: h.price,
+          dailyPct: null as number | null,
+          mktValue,
+          cost: h.cost,
+          returnAmt,
+          returnPct,
+          allocPct: 0, // computed below
+          trend: null as string | null,
+        };
+      });
+    }
+    if (DEMO_MODE) return HOLDINGS.map((h) => ({
+      ticker: h.ticker as string,
+      type: h.type as string,
+      account: h.account as string,
+      qty: h.qty as number | null,
+      unit: h.unit as string,
+      price: h.price as number | null,
+      dailyPct: h.dailyPct as number | null,
+      mktValue: h.mktValue as number,
+      cost: h.cost as number | null,
+      returnAmt: h.returnAmt as number | null,
+      returnPct: h.returnPct as number | null,
+      allocPct: h.allocPct as number,
+      trend: h.trend as string | null,
+    }));
+    return [];
+  }, [hasRealData, realHoldings]);
+
+  // Combine holdings by ticker when toggled
+  const combinedHoldings = useMemo(() => {
+    if (!combined) return displayHoldings;
+    const grouped = new Map<string, {
+      ticker: string; type: string; account: string; qty: number | null;
+      unit: string; price: number | null; dailyPct: number | null;
+      mktValue: number; cost: number | null; returnAmt: number | null;
+      returnPct: number | null; allocPct: number; trend: string | null;
+    }>();
+    for (const h of displayHoldings) {
+      const existing = grouped.get(h.ticker);
+      if (!existing) {
+        grouped.set(h.ticker, {
+          ticker: h.ticker, type: h.type ?? '', account: h.account,
+          qty: h.qty, unit: h.unit ?? h.ticker, price: h.price ?? null,
+          dailyPct: h.dailyPct ?? null, mktValue: h.mktValue ?? 0,
+          cost: h.cost ?? null, returnAmt: h.returnAmt ?? null,
+          returnPct: h.returnPct ?? null, allocPct: h.allocPct ?? 0,
+          trend: h.trend ?? null,
+        });
+      } else {
+        const accts = new Set(existing.account.split(', '));
+        accts.add(h.account);
+        existing.account = [...accts].join(', ');
+        existing.qty = (existing.qty ?? 0) + (h.qty ?? 0);
+        existing.mktValue = (existing.mktValue ?? 0) + (h.mktValue ?? 0);
+        existing.cost = existing.cost != null || h.cost != null
+          ? (existing.cost ?? 0) + (h.cost ?? 0) : null;
+        existing.returnAmt = existing.cost != null
+          ? existing.mktValue - existing.cost : null;
+        existing.returnPct = existing.returnAmt != null && existing.cost != null && existing.cost > 0
+          ? (existing.returnAmt / existing.cost) * 100 : null;
+      }
+    }
+    return [...grouped.values()];
+  }, [displayHoldings, combined]);
+
+  // Compute allocation percentages
+  const totalValue = useMemo(() =>
+    combinedHoldings.reduce((s, h) => s + (h.mktValue ?? 0), 0),
+    [combinedHoldings]
+  );
+  const holdingsWithAlloc = useMemo(() =>
+    combinedHoldings.map((h) => ({
+      ...h,
+      allocPct: totalValue > 0 ? ((h.mktValue ?? 0) / totalValue) * 100 : 0,
+    })),
+    [combinedHoldings, totalValue]
+  );
+
+  // Real allocation for donut (group by asset type)
+  const STABLECOINS = new Set(['USD', 'USDC', 'USDT']);
+  const realAllocation = useMemo(() => {
+    if (!hasRealData || totalValue <= 0) return null;
+    const groups: Record<string, number> = { Crypto: 0, Cash: 0 };
+    for (const h of holdingsWithAlloc) {
+      if (STABLECOINS.has(h.ticker)) groups['Cash'] = (groups['Cash'] ?? 0) + (h.mktValue ?? 0);
+      else groups['Crypto'] = (groups['Crypto'] ?? 0) + (h.mktValue ?? 0);
+    }
+    const alloc = Object.entries(groups)
+      .filter(([, v]) => v > 0)
+      .map(([label, value]) => ({
+        label,
+        pct: Math.round((value / totalValue) * 100),
+        color: label === 'Crypto' ? '#22d3ee' : label === 'Cash' ? '#8b949e' : '#46f1c5',
+      }))
+      .sort((a, b) => b.pct - a.pct);
+    return alloc;
+  }, [holdingsWithAlloc, hasRealData, totalValue]);
+
   const accountCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const h of HOLDINGS) {
+    for (const h of displayHoldings) {
       counts[h.account] = (counts[h.account] ?? 0) + 1;
     }
     return counts;
-  }, []);
+  }, [displayHoldings]);
 
   const accounts = useMemo(() => Object.keys(accountCounts), [accountCounts]);
 
+  // Filter by account (only when not combined)
   const filtered = useMemo(() => {
+    if (combined) return holdingsWithAlloc;
     const list = activeAccount === 'All'
-      ? [...HOLDINGS]
-      : HOLDINGS.filter((h) => h.account === activeAccount);
+      ? holdingsWithAlloc
+      : holdingsWithAlloc.filter((h) => h.account === activeAccount);
     return list;
-  }, [activeAccount]);
+  }, [activeAccount, holdingsWithAlloc, combined]);
 
-  const visible = showAll ? filtered : filtered.slice(0, 5);
-  const hasMore = filtered.length > 5;
+  // Sort
+  function toggleSort(field: string) {
+    if (sortField === field) {
+      setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir(field === 'ticker' || field === 'account' ? 'asc' : 'desc');
+    }
+  }
+
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      let av: number | string | null = null;
+      let bv: number | string | null = null;
+      switch (sortField) {
+        case 'ticker': av = a.ticker; bv = b.ticker; break;
+        case 'account': av = a.account; bv = b.account; break;
+        case 'qty': av = a.qty; bv = b.qty; break;
+        case 'price': av = a.price; bv = b.price; break;
+        case 'mktValue': av = a.mktValue; bv = b.mktValue; break;
+        case 'cost': av = a.cost; bv = b.cost; break;
+        case 'returnAmt': av = a.returnAmt; bv = b.returnAmt; break;
+        case 'allocPct': av = a.allocPct; bv = b.allocPct; break;
+      }
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir;
+      return ((av as number) - (bv as number)) * dir;
+    });
+    return list;
+  }, [filtered, sortField, sortDir]);
+
+  const visible = showAll ? sorted : sorted.slice(0, 5);
+  const hasMore = sorted.length > 5;
+
+  const sortArrow = (field: string) =>
+    sortField === field ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   return (
     <>
@@ -164,11 +392,13 @@ export default function PortfolioPage() {
             <div>
               <p className="text-[10px] text-on-surface-variant section-header mb-1">Net Worth</p>
               <h3 className="text-4xl font-mono text-primary font-bold tracking-tight">
-                {DEMO_MODE ? '$847,291.44' : '$—'}
+                {netWorth != null ? `$${fmt(netWorth, 2)}` : (DEMO_MODE ? '$847,291.44' : '$—')}
               </h3>
             </div>
             <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 font-mono">
-              {DEMO_MODE ? '+12.4% (YTD)' : '— (YTD)'}
+              {totalReturn != null && totalInvested != null && totalInvested > 0
+                ? `${totalReturn >= 0 ? '+' : ''}${((totalReturn / totalInvested) * 100).toFixed(1)}% (all time)`
+                : (DEMO_MODE ? '+12.4% (YTD)' : '— (YTD)')}
             </span>
           </div>
           <div className="h-48 w-full relative">
@@ -196,9 +426,10 @@ export default function PortfolioPage() {
           <div className="relative w-48 h-48 flex items-center justify-center">
             <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
               <circle cx="18" cy="18" r="15.9" fill="transparent" stroke="#262a31" strokeWidth="4" />
-              {DEMO_MODE && (() => {
+              {(() => {
+                const allocData = realAllocation ?? (DEMO_MODE ? ALLOCATION : []);
                 let offset = 0;
-                return ALLOCATION.map((seg) => {
+                return allocData.map((seg) => {
                   const el = (
                     <circle
                       key={seg.label}
@@ -216,12 +447,25 @@ export default function PortfolioPage() {
               })()}
             </svg>
             <div className="absolute flex flex-col items-center">
-              <span className="text-sm font-bold uppercase text-on-surface">{DEMO_MODE ? 'Stocks' : '—'}</span>
-              <span className="text-lg font-mono font-bold text-primary">{DEMO_MODE ? '45%' : '—'}</span>
+              {(() => {
+                const allocData = realAllocation ?? (DEMO_MODE ? ALLOCATION : null);
+                const top = allocData?.[0];
+                return top ? (
+                  <>
+                    <span className="text-sm font-bold uppercase text-on-surface">{top.label}</span>
+                    <span className="text-lg font-mono font-bold text-primary">{top.pct}%</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-bold uppercase text-on-surface">—</span>
+                    <span className="text-lg font-mono font-bold text-primary">—</span>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-6 w-full text-[10px] text-on-surface-variant">
-            {ALLOCATION.slice(0, 3).map((seg) => (
+            {(realAllocation ?? (DEMO_MODE ? ALLOCATION : [])).slice(0, 3).map((seg) => (
               <div key={seg.label} className="flex items-center gap-1.5">
                 <div className="w-2 h-2" style={{ backgroundColor: seg.color }} />
                 {seg.label.toUpperCase()}
@@ -235,11 +479,11 @@ export default function PortfolioPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-primary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Total Invested</p>
-          <p className="font-mono text-xl text-on-surface">{DEMO_MODE ? '$512,900.00' : '$—'}</p>
+          <p className="font-mono text-xl text-on-surface">{totalInvested != null ? `$${fmt(totalInvested, 2)}` : (DEMO_MODE ? '$512,900.00' : '$—')}</p>
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-secondary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Total Return</p>
-          <p className="font-mono text-xl text-secondary">{DEMO_MODE ? '+$334,391.44' : '$—'}</p>
+          <p className={`font-mono text-xl ${totalReturn != null && totalReturn >= 0 ? 'text-secondary' : totalReturn != null ? 'text-error' : 'text-secondary'}`}>{totalReturn != null ? `${totalReturn >= 0 ? '+' : ''}$${fmt(Math.abs(totalReturn), 2)}` : (DEMO_MODE ? '+$334,391.44' : '$—')}</p>
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-on-surface-variant/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Annualized</p>
@@ -247,7 +491,7 @@ export default function PortfolioPage() {
         </div>
         <div className="bg-surface-container-low border border-outline p-4 border-l-2 border-l-tertiary/20">
           <p className="text-[10px] text-on-surface-variant section-header mb-1">Cash Position</p>
-          <p className="font-mono text-xl text-on-surface">{DEMO_MODE ? '$102,492.12' : '$—'}</p>
+          <p className="font-mono text-xl text-on-surface">{cashPosition != null ? `$${fmt(cashPosition, 2)}` : (DEMO_MODE ? '$102,492.12' : '$—')}</p>
         </div>
       </div>
 
@@ -315,8 +559,53 @@ export default function PortfolioPage() {
               onChange={handleFileUpload}
               className="hidden"
             />
+            <button
+              onClick={() => setCashFormOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition-colors duration-75"
+            >
+              <Landmark size={14} strokeWidth={2} />
+              Add Cash
+            </button>
           </div>
         </div>
+
+        {cashFormOpen && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-outline bg-surface-container-lowest">
+            <input
+              placeholder="Account name"
+              value={cashAccountName}
+              onChange={(e) => setCashAccountName(e.target.value)}
+              className="bg-surface-container-lowest border border-outline text-xs px-2 py-1.5 text-on-surface focus:border-primary focus:outline-none w-36"
+            />
+            <div className="flex items-center gap-1">
+              <span className="text-on-surface-variant text-xs">$</span>
+              <input
+                type="number"
+                placeholder="Balance"
+                value={cashBalance}
+                onChange={(e) => setCashBalance(e.target.value)}
+                className="bg-surface-container-lowest border border-outline text-xs px-2 py-1.5 text-on-surface font-mono focus:border-primary focus:outline-none w-28 text-right"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                if (!cashAccountName.trim() || !cashBalance) return;
+                await fetch('/api/portfolio/manual-balance', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ accountName: cashAccountName, asset: 'USD', balance: parseFloat(cashBalance) }),
+                });
+                setCashFormOpen(false);
+                setCashAccountName('');
+                setCashBalance('');
+                loadRealHoldings();
+              }}
+              className="px-3 py-1.5 bg-primary text-on-primary text-xs font-bold hover:brightness-110"
+            >
+              Save
+            </button>
+          </div>
+        )}
 
         {importStatus && (
           <div className="px-4 py-2 text-xs text-on-surface-variant border-b border-outline bg-surface-container-lowest font-mono">
@@ -337,7 +626,7 @@ export default function PortfolioPage() {
               >
                 All
               </button>
-              {DEMO_MODE && accounts.map((acct) => (
+              {!combined && accounts.map((acct) => (
                 <button
                   key={acct}
                   onClick={() => { setActiveAccount(acct); setShowAll(false); }}
@@ -351,6 +640,24 @@ export default function PortfolioPage() {
                   <span className="opacity-60">{accountCounts[acct]}</span>
                 </button>
               ))}
+              <div className="ml-auto flex border border-outline">
+                <button
+                  onClick={() => { setCombined(false); }}
+                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors duration-75 ${
+                    !combined ? 'bg-surface-container-high text-on-surface' : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  Split
+                </button>
+                <button
+                  onClick={() => { setCombined(true); setActiveAccount('All'); }}
+                  className={`px-2.5 py-1 text-[10px] font-bold border-l border-outline transition-colors duration-75 ${
+                    combined ? 'bg-surface-container-high text-on-surface' : 'text-on-surface-variant hover:text-on-surface'
+                  }`}
+                >
+                  Merge
+                </button>
+              </div>
             </div>
 
             {/* Holdings grid */}
@@ -358,22 +665,22 @@ export default function PortfolioPage() {
               <table className="w-full text-left text-xs">
                 <thead className="text-on-surface-variant bg-surface-container-lowest">
                   <tr className="section-header text-[10px]">
-                    <th className="p-3 pl-4">Asset</th>
-                    <th className="p-3">Account</th>
-                    <th className="p-3">Qty</th>
-                    <th className="p-3">Price</th>
-                    <th className="p-3 text-right">Mkt Value</th>
-                    <th className="p-3 text-right">Cost</th>
-                    <th className="p-3 text-right">Return</th>
-                    <th className="p-3 text-right">Alloc.</th>
+                    <th className="p-3 pl-4 cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('ticker')}>Asset{sortArrow('ticker')}</th>
+                    <th className="p-3 cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('account')}>Account{sortArrow('account')}</th>
+                    <th className="p-3 cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('qty')}>Qty{sortArrow('qty')}</th>
+                    <th className="p-3 cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('price')}>Price{sortArrow('price')}</th>
+                    <th className="p-3 text-right cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('mktValue')}>Mkt Value{sortArrow('mktValue')}</th>
+                    <th className="p-3 text-right cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('cost')}>Cost{sortArrow('cost')}</th>
+                    <th className="p-3 text-right cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('returnAmt')}>Return{sortArrow('returnAmt')}</th>
+                    <th className="p-3 text-right cursor-pointer hover:text-on-surface select-none" onClick={() => toggleSort('allocPct')}>Alloc.{sortArrow('allocPct')}</th>
                     <th className="p-3">7D</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/10">
-                  {!DEMO_MODE ? (
-                    <tr><td colSpan={9} className="p-8 text-center text-on-surface-variant text-sm">No holdings data. Enable demo mode to preview.</td></tr>
+                  {displayHoldings.length === 0 ? (
+                    <tr><td colSpan={9} className="p-8 text-center text-on-surface-variant text-sm">No holdings data. Import a CSV to get started.</td></tr>
                   ) : visible.map((h) => (
-                    <tr key={h.ticker} className="hover:bg-surface-bright transition-colors duration-75">
+                    <tr key={`${h.account}-${h.ticker}`} className="hover:bg-surface-bright transition-colors duration-75">
                       {/* Asset — colored left border + type subtitle */}
                       <td className="p-3 pl-0">
                         <div className="flex items-stretch gap-0">
@@ -405,9 +712,6 @@ export default function PortfolioPage() {
                               <div className={`text-[10px] ${h.dailyPct >= 0 ? 'text-secondary' : 'text-error'}`}>
                                 {h.dailyPct >= 0 ? '+' : ''}{h.dailyPct.toFixed(2)}%
                               </div>
-                            )}
-                            {'priceNote' in h && h.priceNote && (
-                              <div className="text-[10px] text-on-surface-variant">({h.priceNote})</div>
                             )}
                           </div>
                         ) : (
