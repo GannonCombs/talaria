@@ -251,35 +251,35 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
       await client.batch([
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
-          args: ['Push', '["Chest","Triceps","Shoulders"]', 0, JSON.stringify([
-            { name: 'Bench Press', sets: 4, reps: 10, weight: 185 },
-            { name: 'Incline DB Press', sets: 3, reps: 12, weight: 75 },
-            { name: 'Tricep Pushdown', sets: 3, reps: 12, weight: 50 },
-            { name: 'Cable Fly', sets: 3, reps: 15, weight: 30 },
-            { name: 'Overhead Extension', sets: 3, reps: 12, weight: 40 },
-            { name: 'Dips', sets: 3, reps: 10, weight: 0 },
+          args: ['Chest + Tri', '["Chest","Triceps","Shoulders"]', 0, JSON.stringify([
+            { name: 'Military Bench', sets: 3, reps: 10, weight: 0 },
+            { name: 'Tri Pull Down', sets: 3, reps: 12, weight: 0 },
+            { name: 'Shoulder Raise', sets: 3, reps: 12, weight: 0 },
+            { name: 'Chest Press Machine', sets: 3, reps: 10, weight: 0 },
+            { name: 'Flys', sets: 3, reps: 12, weight: 0 },
+            { name: 'Planks', sets: 3, reps: 1, weight: 0 },
           ])],
         },
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
-          args: ['Pull', '["Back","Biceps"]', 1, JSON.stringify([
-            { name: 'Deadlift', sets: 4, reps: 8, weight: 225 },
-            { name: 'Barbell Row', sets: 3, reps: 10, weight: 135 },
-            { name: 'Lat Pulldown', sets: 3, reps: 12, weight: 120 },
-            { name: 'Face Pull', sets: 3, reps: 15, weight: 40 },
-            { name: 'Bicep Curl', sets: 3, reps: 12, weight: 35 },
-            { name: 'Hammer Curl', sets: 3, reps: 10, weight: 30 },
+          args: ['Back + Bi', '["Back","Biceps"]', 1, JSON.stringify([
+            { name: 'Lat Pulldowns', sets: 3, reps: 10, weight: 0 },
+            { name: 'Dumbbell Curls', sets: 3, reps: 12, weight: 0 },
+            { name: 'Row Machine', sets: 3, reps: 10, weight: 0 },
+            { name: 'Dumbbell Rows', sets: 3, reps: 10, weight: 0 },
+            { name: 'Victory', sets: 3, reps: 12, weight: 0 },
+            { name: 'Russian Twists', sets: 3, reps: 20, weight: 0 },
           ])],
         },
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
-          args: ['Legs', '["Quads","Hamstrings","Calves"]', 2, JSON.stringify([
-            { name: 'Squat', sets: 4, reps: 8, weight: 225 },
-            { name: 'Leg Press', sets: 3, reps: 12, weight: 360 },
-            { name: 'Romanian Deadlift', sets: 3, reps: 10, weight: 185 },
-            { name: 'Leg Extension', sets: 3, reps: 12, weight: 100 },
-            { name: 'Leg Curl', sets: 3, reps: 12, weight: 80 },
-            { name: 'Calf Raise', sets: 4, reps: 15, weight: 135 },
+          args: ['Legs', '["Quads","Hamstrings","Glutes","Calves"]', 2, JSON.stringify([
+            { name: 'Quad Press', sets: 3, reps: 10, weight: 0 },
+            { name: 'Hammy Machine', sets: 3, reps: 12, weight: 0 },
+            { name: 'Quad Machine', sets: 3, reps: 12, weight: 0 },
+            { name: 'Calf Raise Machine', sets: 3, reps: 15, weight: 0 },
+            { name: 'Glute', sets: 3, reps: 12, weight: 0 },
+            { name: 'Inner Thigh Machine', sets: 3, reps: 12, weight: 0 },
           ])],
         },
         {
