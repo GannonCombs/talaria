@@ -197,6 +197,98 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
       );
     `);
   }
+
+  if (fromVersion < 12) {
+    await client.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS fitness_splits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        muscle_groups TEXT,
+        rotation_order INTEGER NOT NULL,
+        exercises TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS fitness_rotation_state (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        current_split_index INTEGER NOT NULL DEFAULT 0,
+        last_workout_date TEXT
+      );
+      CREATE TABLE IF NOT EXISTS fitness_exercises (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workout_id INTEGER NOT NULL,
+        exercise_name TEXT NOT NULL,
+        exercise_type TEXT NOT NULL DEFAULT 'weighted',
+        sort_order INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS fitness_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        exercise_id INTEGER NOT NULL,
+        set_number INTEGER NOT NULL,
+        set_type TEXT NOT NULL DEFAULT 'working',
+        weight REAL,
+        reps INTEGER
+      );
+    `);
+
+    // Add columns to fitness_workouts for weight training
+    const cols = await client.execute("PRAGMA table_info(fitness_workouts)");
+    const colNames = new Set(cols.rows.map(r => r.name));
+    if (!colNames.has('split_id')) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN split_id INTEGER');
+    }
+    if (!colNames.has('split_name')) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN split_name TEXT');
+    }
+    if (!colNames.has('started_at')) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN started_at TEXT');
+    }
+    if (!colNames.has('finished_at')) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN finished_at TEXT');
+    }
+
+    // Seed default splits
+    const checkSplits = await client.execute('SELECT COUNT(*) as n FROM fitness_splits');
+    if (Number(checkSplits.rows[0].n) === 0) {
+      await client.batch([
+        {
+          sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
+          args: ['Push', '["Chest","Triceps","Shoulders"]', 0, JSON.stringify([
+            { name: 'Bench Press', sets: 4, reps: 10, weight: 185 },
+            { name: 'Incline DB Press', sets: 3, reps: 12, weight: 75 },
+            { name: 'Tricep Pushdown', sets: 3, reps: 12, weight: 50 },
+            { name: 'Cable Fly', sets: 3, reps: 15, weight: 30 },
+            { name: 'Overhead Extension', sets: 3, reps: 12, weight: 40 },
+            { name: 'Dips', sets: 3, reps: 10, weight: 0 },
+          ])],
+        },
+        {
+          sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
+          args: ['Pull', '["Back","Biceps"]', 1, JSON.stringify([
+            { name: 'Deadlift', sets: 4, reps: 8, weight: 225 },
+            { name: 'Barbell Row', sets: 3, reps: 10, weight: 135 },
+            { name: 'Lat Pulldown', sets: 3, reps: 12, weight: 120 },
+            { name: 'Face Pull', sets: 3, reps: 15, weight: 40 },
+            { name: 'Bicep Curl', sets: 3, reps: 12, weight: 35 },
+            { name: 'Hammer Curl', sets: 3, reps: 10, weight: 30 },
+          ])],
+        },
+        {
+          sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
+          args: ['Legs', '["Quads","Hamstrings","Calves"]', 2, JSON.stringify([
+            { name: 'Squat', sets: 4, reps: 8, weight: 225 },
+            { name: 'Leg Press', sets: 3, reps: 12, weight: 360 },
+            { name: 'Romanian Deadlift', sets: 3, reps: 10, weight: 185 },
+            { name: 'Leg Extension', sets: 3, reps: 12, weight: 100 },
+            { name: 'Leg Curl', sets: 3, reps: 12, weight: 80 },
+            { name: 'Calf Raise', sets: 4, reps: 15, weight: 135 },
+          ])],
+        },
+        {
+          sql: 'INSERT OR IGNORE INTO fitness_rotation_state (id, current_split_index) VALUES (1, 0)',
+          args: [],
+        },
+      ], 'write');
+    }
+  }
 }
 
 // ── Fresh DB build ─────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -77,6 +77,37 @@ export const CREATE_TABLES_SQL = `
     distance_miles REAL,
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_splits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    muscle_groups TEXT,
+    rotation_order INTEGER NOT NULL,
+    exercises TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_rotation_state (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    current_split_index INTEGER NOT NULL DEFAULT 0,
+    last_workout_date TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workout_id INTEGER NOT NULL,
+    exercise_name TEXT NOT NULL,
+    exercise_type TEXT NOT NULL DEFAULT 'weighted',
+    sort_order INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    exercise_id INTEGER NOT NULL,
+    set_number INTEGER NOT NULL,
+    set_type TEXT NOT NULL DEFAULT 'working',
+    weight REAL,
+    reps INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS reading_logs (
