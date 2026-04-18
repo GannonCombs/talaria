@@ -186,6 +186,17 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
       );
     `);
   }
+
+  if (fromVersion < 11) {
+    await client.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS reading_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        pages INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  }
 }
 
 // ── Fresh DB build ─────────────────────────────────────────────────────────

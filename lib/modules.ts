@@ -179,12 +179,40 @@ registerModule({
   icon: 'BookOpen',
   route: '/reading',
   services: [],
-  getDashboardMetrics: async () => ({
-    primary: {
-      label: 'Pages Today',
-      value: '—',
-    },
-    secondary: [],
-  }),
+  getDashboardMetrics: async () => {
+    const today = new Date().toISOString().split('T')[0];
+    const { dbGet, dbAll } = await import('./db');
+    const row = await dbGet<{ total: number }>(
+      "SELECT COALESCE(SUM(pages), 0) as total FROM reading_logs WHERE date = ?",
+      today
+    );
+    const todayPages = row?.total ?? 0;
+
+    const streakRow = await dbAll<{ date: string }>(
+      "SELECT DISTINCT date FROM reading_logs ORDER BY date DESC LIMIT 30"
+    );
+    // Count consecutive days from today/yesterday backward
+    let streak = 0;
+    const dates = new Set(streakRow.map(r => r.date));
+    const d = new Date();
+    // If nothing logged today, start checking from yesterday
+    if (!dates.has(d.toISOString().split('T')[0])) {
+      d.setDate(d.getDate() - 1);
+    }
+    while (dates.has(d.toISOString().split('T')[0])) {
+      streak++;
+      d.setDate(d.getDate() - 1);
+    }
+
+    return {
+      primary: {
+        label: 'Pages Today',
+        value: todayPages > 0 ? `${todayPages}` : '—',
+      },
+      secondary: [
+        { label: 'Streak', value: streak > 0 ? `${streak}d` : '—' },
+      ],
+    };
+  },
   getTables: () => [],
 });
