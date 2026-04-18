@@ -140,6 +140,21 @@ function runMigrations(db: Database.Database, fromVersion: number): void {
       );
     `);
   }
+
+  if (fromVersion < 10) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fitness_workouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'cardio',
+        activity TEXT NOT NULL DEFAULT 'run',
+        duration_minutes REAL,
+        distance_miles REAL,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  }
 }
 
 function buildSchema(db: Database.Database): void {

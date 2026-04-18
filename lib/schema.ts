@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -66,6 +66,17 @@ export const CREATE_TABLES_SQL = `
     balance REAL NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(account_id, asset)
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_workouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'cardio',
+    activity TEXT NOT NULL DEFAULT 'run',
+    duration_minutes REAL,
+    distance_miles REAL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `;
 
