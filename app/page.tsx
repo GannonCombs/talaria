@@ -1,5 +1,6 @@
 import {
   Activity,
+  BookOpen,
   Home,
   PieChart,
   ShoppingBag,
@@ -22,6 +23,7 @@ export const dynamic = 'force-dynamic';
 // ── Icon resolver ──
 const ICON_MAP: Record<string, LucideIcon> = {
   Activity,
+  BookOpen,
   Home,
   PieChart,
   ShoppingBag,
@@ -261,7 +263,6 @@ export default async function Dashboard() {
           />
         ))}
 
-        <AddModuleCard />
         <AddModuleCard />
       </div>
 

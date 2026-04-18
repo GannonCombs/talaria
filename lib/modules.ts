@@ -173,3 +173,19 @@ registerModule({
   }),
   getTables: () => [],
 });
+
+registerModule({
+  id: 'reading',
+  name: 'Reading',
+  icon: 'BookOpen',
+  route: '/reading',
+  services: [],
+  getDashboardMetrics: async () => ({
+    primary: {
+      label: 'Pages Today',
+      value: '—',
+    },
+    secondary: [],
+  }),
+  getTables: () => [],
+});
