@@ -14,7 +14,7 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult | n
   const cacheKey = `geocode:${address.toLowerCase().trim()}`;
 
   // Check cache first
-  const cached = getCached(cacheKey);
+  const cached = await getCached(cacheKey);
   if (cached) {
     return JSON.parse(cached);
   }
@@ -23,12 +23,12 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult | n
   const freeResult = await geocodeNominatim(address);
   if (freeResult) {
     // Cache the free result too (so we don't even hit Nominatim again)
-    const { getDb } = await import('@/lib/db');
-    const db = getDb();
-    db.prepare(
+    const { dbRun } = await import('@/lib/db');
+    await dbRun(
       `INSERT OR REPLACE INTO mpp_cache (cache_key, endpoint, response, cost_usd, expires_at)
-       VALUES (?, ?, ?, ?, ?)`
-    ).run(cacheKey, 'nominatim', JSON.stringify(freeResult), 0, null);
+       VALUES (?, ?, ?, ?, ?)`,
+      cacheKey, 'nominatim', JSON.stringify(freeResult), 0, null
+    );
     return freeResult;
   }
 
@@ -108,7 +108,7 @@ export async function fetchIsochrone(
 ): Promise<IsochroneResult | null> {
   const cacheKey = `isochrone:${lat.toFixed(4)},${lng.toFixed(4)},${minutes},${mode}`;
 
-  const cached = getCached(cacheKey);
+  const cached = await getCached(cacheKey);
   if (cached) {
     return JSON.parse(cached);
   }
@@ -134,12 +134,12 @@ export async function fetchIsochrone(
 
     if (result) {
       // Cache forever (address + time combo doesn't change)
-      const { getDb } = await import('@/lib/db');
-      const db = getDb();
-      db.prepare(
+      const { dbRun } = await import('@/lib/db');
+      await dbRun(
         `INSERT OR REPLACE INTO mpp_cache (cache_key, endpoint, response, cost_usd, expires_at)
-         VALUES (?, ?, ?, ?, ?)`
-      ).run(cacheKey, 'valhalla', JSON.stringify(result), 0, null);
+         VALUES (?, ?, ?, ?, ?)`,
+        cacheKey, 'valhalla', JSON.stringify(result), 0, null
+      );
     }
 
     return result;

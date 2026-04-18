@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'balance must be a number' }, { status: 400 });
   }
 
-  const accountId = getOrCreateAccount(accountName, accountType ?? 'bank');
-  setManualBalance(accountId, asset, balance);
+  const accountId = await getOrCreateAccount(accountName, accountType ?? 'bank');
+  await setManualBalance(accountId, asset, balance);
 
   return NextResponse.json({ ok: true, accountName, asset, balance });
 }

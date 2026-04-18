@@ -13,13 +13,23 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const days = Number(params.get('days')) || 7;
 
+  const [today, month, lifetime, totalCalls, avgPerSession, byService, daily] = await Promise.all([
+    getTodaySpend(),
+    getMonthSpend(),
+    getLifetimeSpend(),
+    getTotalCalls(),
+    getAvgCostPerSession(),
+    getSpendByService(),
+    getDailySpend(days),
+  ]);
+
   return NextResponse.json({
-    today: getTodaySpend(),
-    month: getMonthSpend(),
-    lifetime: getLifetimeSpend(),
-    totalCalls: getTotalCalls(),
-    avgPerSession: getAvgCostPerSession(),
-    byService: getSpendByService(),
-    daily: getDailySpend(days),
+    today,
+    month,
+    lifetime,
+    totalCalls,
+    avgPerSession,
+    byService,
+    daily,
   });
 }

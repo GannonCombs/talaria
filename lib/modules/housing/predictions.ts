@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { dbGet, dbRun } from '@/lib/db';
 
 export interface FedPrediction {
   meetingDate: string;
@@ -10,7 +10,7 @@ export interface FedPrediction {
 
 export async function fetchFedPredictions(): Promise<FedPrediction> {
   // Return cache if fresh (< 15 minutes)
-  const cached = getCachedPrediction();
+  const cached = await getCachedPrediction();
   if (cached) return cached;
 
   // Try Kalshi first (structured ticker data, more reliable), then Polymarket
@@ -34,7 +34,7 @@ export async function fetchFedPredictions(): Promise<FedPrediction> {
     return { meetingDate: '', cutProb: 0, holdProb: 0, hikeProb: 0, source: 'unavailable' };
   }
 
-  cachePrediction(prediction);
+  await cachePrediction(prediction);
   return prediction;
 }
 
@@ -185,15 +185,12 @@ async function fetchKalshi(): Promise<FedPrediction> {
 
 // ── Cache ──
 
-function getCachedPrediction(): FedPrediction | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT * FROM housing_fed_predictions
-       WHERE fetched_at >= datetime('now', '-15 minutes')
-       ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get() as Record<string, unknown> | undefined;
+async function getCachedPrediction(): Promise<FedPrediction | null> {
+  const row = await dbGet<Record<string, unknown>>(
+    `SELECT * FROM housing_fed_predictions
+     WHERE fetched_at >= datetime('now', '-15 minutes')
+     ORDER BY fetched_at DESC LIMIT 1`
+  );
 
   if (!row) return null;
 
@@ -206,22 +203,19 @@ function getCachedPrediction(): FedPrediction | null {
   };
 }
 
-function cachePrediction(pred: FedPrediction): void {
-  const db = getDb();
-  db.prepare(
+async function cachePrediction(pred: FedPrediction): Promise<void> {
+  await dbRun(
     `INSERT INTO housing_fed_predictions (date, meeting_date, cut_prob, hold_prob, hike_prob, source)
-     VALUES (date('now'), ?, ?, ?, ?, ?)`
-  ).run(pred.meetingDate, pred.cutProb, pred.holdProb, pred.hikeProb, pred.source);
+     VALUES (date('now'), ?, ?, ?, ?, ?)`,
+    pred.meetingDate, pred.cutProb, pred.holdProb, pred.hikeProb, pred.source
+  );
 }
 
-export function getLatestPrediction(): FedPrediction | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT * FROM housing_fed_predictions
-       ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get() as Record<string, unknown> | undefined;
+export async function getLatestPrediction(): Promise<FedPrediction | null> {
+  const row = await dbGet<Record<string, unknown>>(
+    `SELECT * FROM housing_fed_predictions
+     ORDER BY fetched_at DESC LIMIT 1`
+  );
 
   if (!row) return null;
 

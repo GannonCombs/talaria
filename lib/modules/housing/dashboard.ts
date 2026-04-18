@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { getDb } from '@/lib/db';
+import { dbGet } from '@/lib/db';
 import type { DashboardMetrics } from '@/lib/modules';
 import { fetchFedPredictions } from './predictions';
 import { getLatestRate } from './bankrate';
@@ -24,14 +24,12 @@ export async function getHousingDashboardMetrics(): Promise<DashboardMetrics> {
     };
   }
 
-  const db = getDb();
-
-  const cityRow = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'city'")
-    .get() as { value: string } | undefined;
+  const cityRow = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'city'"
+  );
   const city = cityRow?.value ?? 'Austin';
 
-  const bestRate = getLatestRate('30yr_fixed');
+  const bestRate = await getLatestRate('30yr_fixed');
   const pred = await fetchFedPredictions();
 
   const rateStr = bestRate ? `${bestRate.rate}%` : '—';

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { dbGet, dbRun } from '@/lib/db';
 import { refreshListingsForCity } from '@/lib/modules/housing/rentcast';
 
 // Cooldown: at most one refresh attempt per hour for any (city, state)
@@ -27,13 +27,10 @@ export function inCooldownAt(
   return ageMinutes < cooldownMinutes;
 }
 
-function getLastAttempt(): RefreshAttempt | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      "SELECT value FROM user_preferences WHERE key = 'housing.listings_last_refresh_attempt'"
-    )
-    .get() as { value: string } | undefined;
+async function getLastAttempt(): Promise<RefreshAttempt | null> {
+  const row = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'housing.listings_last_refresh_attempt'"
+  );
   if (!row) return null;
   try {
     return JSON.parse(row.value) as RefreshAttempt;
@@ -42,18 +39,18 @@ function getLastAttempt(): RefreshAttempt | null {
   }
 }
 
-function writeAttempt(city: string, state: string): void {
-  const db = getDb();
+async function writeAttempt(city: string, state: string): Promise<void> {
   const attempt: RefreshAttempt = {
     city,
     state,
     startedAt: new Date().toISOString(),
   };
-  db.prepare(
+  await dbRun(
     `INSERT INTO user_preferences (key, value, updated_at)
      VALUES ('housing.listings_last_refresh_attempt', ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  ).run(JSON.stringify(attempt));
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    JSON.stringify(attempt)
+  );
 }
 
 function inCooldown(attempt: RefreshAttempt | null): boolean {
@@ -77,7 +74,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Cooldown check (defense in depth — the client also checks this).
-  const lastAttempt = getLastAttempt();
+  const lastAttempt = await getLastAttempt();
   if (inCooldown(lastAttempt)) {
     const ageMinutes = lastAttempt
       ? Math.floor((Date.now() - new Date(lastAttempt.startedAt).getTime()) / (1000 * 60))
@@ -95,7 +92,7 @@ export async function POST(request: NextRequest) {
 
   // Write the attempt timestamp BEFORE the MPP call. If the call fails
   // or hangs, the cooldown is still set, so we don't loop on errors.
-  writeAttempt(city, state);
+  await writeAttempt(city, state);
 
   try {
     const result = await refreshListingsForCity(city, state);

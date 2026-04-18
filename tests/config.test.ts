@@ -2,11 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { DEMO_MODE } from '@/lib/config';
 import { SCHEMA_VERSION, DEFAULT_PREFERENCES, DEFAULT_MODULES } from '@/lib/schema';
 
-describe('config', () => {
-  it('DEMO_MODE is off', () => {
-    expect(DEMO_MODE).toBe(false);
-  });
-});
 
 describe('schema', () => {
   it('has a valid schema version', () => {

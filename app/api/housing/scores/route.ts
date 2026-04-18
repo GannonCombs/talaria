@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { computeAllScores, getWiredDimensions, type ScoringWeights } from '@/lib/modules/housing/scoring';
-import { getDb } from '@/lib/db';
+import { dbAll } from '@/lib/db';
 
 const DEFAULT_WEIGHTS: ScoringWeights = {
   crime: 9,
@@ -14,14 +14,13 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
 
 // GET: return wired dimensions + neighborhood data (for map/drawer display)
 export async function GET() {
-  const wiredDimensions = getWiredDimensions();
-  const db = getDb();
-  const neighborhoods = db
-    .prepare(`SELECT n.*, COALESCE(m.median_price, 0) as median_price
-              FROM housing_neighborhoods n
-              LEFT JOIN housing_market_stats m ON m.zip = n.zip
-              ORDER BY n.zip`)
-    .all();
+  const wiredDimensions = await getWiredDimensions();
+  const neighborhoods = await dbAll(
+    `SELECT n.*, COALESCE(m.median_price, 0) as median_price
+     FROM housing_neighborhoods n
+     LEFT JOIN housing_market_stats m ON m.zip = n.zip
+     ORDER BY n.zip`
+  );
 
   return NextResponse.json({
     wiredDimensions: [...wiredDimensions],
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest) {
   const budget = body.budget ?? 550000;
   const currentRate = body.currentRate ?? 5.98;
 
-  const result = computeAllScores(weights, budget, currentRate);
-  const wiredDimensions = getWiredDimensions();
+  const result = await computeAllScores(weights, budget, currentRate);
+  const wiredDimensions = await getWiredDimensions();
   return NextResponse.json({ ok: true, computed: result, wiredDimensions: [...wiredDimensions] });
 }

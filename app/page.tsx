@@ -14,7 +14,7 @@ import TransactionTable, {
   type Transaction,
 } from '@/components/dashboard/TransactionTable';
 import { getRegisteredModules, type DashboardMetrics } from '@/lib/modules';
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll } from '@/lib/db';
 
 
 // Force dynamic rendering — dashboard reads live DB data
@@ -150,29 +150,25 @@ function renderCustomContent(key: string, data?: Record<string, unknown>): React
 
 // ── Dashboard page ──
 
-function getPref(key: string): string {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT value FROM user_preferences WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+async function getPref(key: string): Promise<string> {
+  const row = await dbGet<{ value: string }>(
+    'SELECT value FROM user_preferences WHERE key = ?', key
+  );
   return row?.value ?? '';
 }
 
-function getRecentTransactions(): Transaction[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      'SELECT id, timestamp, service, module, rail, cost_usd, metadata FROM mpp_transactions ORDER BY timestamp DESC LIMIT 10'
-    )
-    .all() as Array<{
-      id: number;
-      timestamp: string;
-      service: string;
-      module: string;
-      rail: string;
-      cost_usd: number;
-      metadata: string | null;
-    }>;
+async function getRecentTransactions(): Promise<Transaction[]> {
+  const rows = await dbAll<{
+    id: number;
+    timestamp: string;
+    service: string;
+    module: string;
+    rail: string;
+    cost_usd: number;
+    metadata: string | null;
+  }>(
+    'SELECT id, timestamp, service, module, rail, cost_usd, metadata FROM mpp_transactions ORDER BY timestamp DESC LIMIT 10'
+  );
 
   return rows.map((r) => {
     let via: string | undefined;
@@ -193,9 +189,9 @@ function getRecentTransactions(): Transaction[] {
 }
 
 export default async function Dashboard() {
-  const name = getPref('name');
-  const city = getPref('city');
-  const state = getPref('state');
+  const name = await getPref('name');
+  const city = await getPref('city');
+  const state = await getPref('state');
 
   const modules = getRegisteredModules();
 
@@ -212,7 +208,7 @@ export default async function Dashboard() {
     })
   );
 
-  const transactions = getRecentTransactions();
+  const transactions = await getRecentTransactions();
 
   return (
     <>

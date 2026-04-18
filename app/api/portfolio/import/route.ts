@@ -48,8 +48,8 @@ export async function POST(request: NextRequest) {
         );
       }
       const accountName = accountNameOverride ?? result.accountName;
-      const accountId = getOrCreateAccount(accountName, 'brokerage');
-      const inserted = insertTransactions(accountId, result.transactions);
+      const accountId = await getOrCreateAccount(accountName, 'brokerage');
+      const inserted = await insertTransactions(accountId, result.transactions);
       return NextResponse.json({
         ok: true,
         format: `merrill-${result.documentType}`,
@@ -97,8 +97,8 @@ export async function POST(request: NextRequest) {
 
     for (const [acctName, acctTxs] of result.perAccountTransactions) {
       const name = accountNameOverride ?? acctName;
-      const accountId = getOrCreateAccount(name, 'brokerage');
-      totalInserted += insertTransactions(accountId, acctTxs);
+      const accountId = await getOrCreateAccount(name, 'brokerage');
+      totalInserted += await insertTransactions(accountId, acctTxs);
       totalParsed += acctTxs.length;
       accountNames.push(name);
     }
@@ -116,9 +116,9 @@ export async function POST(request: NextRequest) {
   // Single-account import (Coinbase, Binance)
   const accountName = accountNameOverride ?? (format === 'coinbase' ? 'Coinbase' : 'Binance');
   const accountType = 'exchange';
-  const accountId = getOrCreateAccount(accountName, accountType);
+  const accountId = await getOrCreateAccount(accountName, accountType);
 
-  const inserted = insertTransactions(accountId, transactions);
+  const inserted = await insertTransactions(accountId, transactions);
 
   return NextResponse.json({
     ok: true,

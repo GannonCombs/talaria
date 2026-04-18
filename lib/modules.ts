@@ -106,17 +106,16 @@ registerModule({
 
     // Read cached values that the portfolio page persists after computing
     // with live prices. No recomputation here — single source of truth.
-    const { getDb } = await import('./db');
-    const db = getDb();
-    const getPref = (key: string): string | null => {
-      const row = db.prepare('SELECT value FROM user_preferences WHERE key = ?').get(key) as { value: string } | undefined;
+    const { dbGet } = await import('./db');
+    const getPref = async (key: string): Promise<string | null> => {
+      const row = await dbGet<{ value: string }>('SELECT value FROM user_preferences WHERE key = ?', key);
       return row?.value ?? null;
     };
 
-    const total = getPref('portfolio.cached_total');
-    const equityPct = getPref('portfolio.cached_equity_pct');
-    const cryptoPct = getPref('portfolio.cached_crypto_pct');
-    const segmentsJson = getPref('portfolio.cached_segments');
+    const total = await getPref('portfolio.cached_total');
+    const equityPct = await getPref('portfolio.cached_equity_pct');
+    const cryptoPct = await getPref('portfolio.cached_crypto_pct');
+    const segmentsJson = await getPref('portfolio.cached_segments');
 
     let segments: Array<{ label: string; pct: number; color: string }> = [];
     if (segmentsJson) {

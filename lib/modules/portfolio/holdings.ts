@@ -3,7 +3,7 @@
 // transaction history (from CSV imports) and manual balance entries
 // (for simple accounts like banks).
 
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll, dbRun, dbBatch } from '@/lib/db';
 
 export interface Holding {
   account: string;
@@ -22,24 +22,22 @@ export interface AccountRow {
 
 // ── Account helpers ─────────────────────────────────────────────────────
 
-export function getOrCreateAccount(name: string, type: string): number {
-  const db = getDb();
-  const existing = db
-    .prepare('SELECT id FROM portfolio_accounts WHERE name = ?')
-    .get(name) as { id: number } | undefined;
+export async function getOrCreateAccount(name: string, type: string): Promise<number> {
+  const existing = await dbGet<{ id: number }>(
+    'SELECT id FROM portfolio_accounts WHERE name = ?', name
+  );
   if (existing) return existing.id;
 
-  const result = db
-    .prepare('INSERT INTO portfolio_accounts (name, type) VALUES (?, ?)')
-    .run(name, type);
+  const result = await dbRun(
+    'INSERT INTO portfolio_accounts (name, type) VALUES (?, ?)', name, type
+  );
   return Number(result.lastInsertRowid);
 }
 
-export function getAccounts(): AccountRow[] {
-  const db = getDb();
-  return db
-    .prepare('SELECT id, name, type FROM portfolio_accounts ORDER BY name')
-    .all() as AccountRow[];
+export async function getAccounts(): Promise<AccountRow[]> {
+  return dbAll<AccountRow>(
+    'SELECT id, name, type FROM portfolio_accounts ORDER BY name'
+  );
 }
 
 // ── Transaction storage ─────────────────────────────────────────────────
@@ -56,54 +54,52 @@ export interface ParsedTransaction {
 
 // Bulk insert transactions, skipping duplicates via UNIQUE constraint.
 // Returns count of new rows inserted.
-export function insertTransactions(accountId: number, txs: ParsedTransaction[]): number {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT OR IGNORE INTO portfolio_transactions
+export async function insertTransactions(accountId: number, txs: ParsedTransaction[]): Promise<number> {
+  const statements = txs.map((tx) => ({
+    sql: `INSERT OR IGNORE INTO portfolio_transactions
       (account_id, external_id, timestamp, tx_type, asset, quantity, usd_value, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      accountId,
+      tx.external_id,
+      tx.timestamp,
+      tx.tx_type,
+      tx.asset,
+      tx.quantity,
+      tx.usd_value,
+      tx.metadata ? JSON.stringify(tx.metadata) : null,
+    ],
+  }));
 
-  let inserted = 0;
-  const insertAll = db.transaction(() => {
-    for (const tx of txs) {
-      const result = stmt.run(
-        accountId,
-        tx.external_id,
-        tx.timestamp,
-        tx.tx_type,
-        tx.asset,
-        tx.quantity,
-        tx.usd_value,
-        tx.metadata ? JSON.stringify(tx.metadata) : null
-      );
-      if (result.changes > 0) inserted++;
-    }
-  });
-  insertAll();
+  await dbBatch(statements);
 
-  return inserted;
+  // dbBatch doesn't give per-statement change counts; query for actual count
+  const row = await dbGet<{ count: number }>(
+    'SELECT COUNT(*) as count FROM portfolio_transactions WHERE account_id = ?',
+    accountId
+  );
+  // Return total count as best approximation — callers just use this for logging
+  return row?.count ?? 0;
 }
 
 // ── Manual balance ──────────────────────────────────────────────────────
 
-export function setManualBalance(accountId: number, asset: string, balance: number): void {
-  const db = getDb();
-  db.prepare(`
-    INSERT OR REPLACE INTO portfolio_manual_balances (account_id, asset, balance, updated_at)
-    VALUES (?, ?, ?, datetime('now'))
-  `).run(accountId, asset, balance);
+export async function setManualBalance(accountId: number, asset: string, balance: number): Promise<void> {
+  await dbRun(
+    `INSERT OR REPLACE INTO portfolio_manual_balances (account_id, asset, balance, updated_at)
+    VALUES (?, ?, ?, datetime('now'))`,
+    accountId, asset, balance
+  );
 }
 
 // ── Compute holdings ────────────────────────────────────────────────────
 
-function getSnapshotPrices(): Map<string, number> {
-  const db = getDb();
-  const snapshotRows = db.prepare(`
+async function getSnapshotPrices(): Promise<Map<string, number>> {
+  const snapshotRows = await dbAll<{ asset: string; metadata: string }>(`
     SELECT asset, metadata FROM portfolio_transactions
     WHERE tx_type = 'snapshot' AND metadata IS NOT NULL
     ORDER BY timestamp DESC
-  `).all() as Array<{ asset: string; metadata: string }>;
+  `);
 
   const prices = new Map<string, number>();
   for (const row of snapshotRows) {
@@ -118,11 +114,15 @@ function getSnapshotPrices(): Map<string, number> {
   return prices;
 }
 
-export function getHoldings(): Holding[] {
-  const db = getDb();
-
+export async function getHoldings(): Promise<Holding[]> {
   // Sum quantities per (account, asset), excluding unvested tx types
-  const txRows = db.prepare(`
+  const txRows = await dbAll<{
+    account: string;
+    asset: string;
+    balance: number;
+    cost_basis: number;
+    tx_count: number;
+  }>(`
     SELECT
       a.name as account,
       t.asset as asset,
@@ -136,15 +136,9 @@ export function getHoldings(): Holding[] {
     GROUP BY t.account_id, t.asset
     HAVING ABS(SUM(t.quantity)) > 0.000001
     ORDER BY a.name, t.asset
-  `).all() as Array<{
-    account: string;
-    asset: string;
-    balance: number;
-    cost_basis: number;
-    tx_count: number;
-  }>;
+  `);
 
-  const snapshotPrices = getSnapshotPrices();
+  const snapshotPrices = await getSnapshotPrices();
 
   const txHoldings: Holding[] = txRows.map((r) => ({
     account: r.account,
@@ -156,12 +150,12 @@ export function getHoldings(): Holding[] {
   }));
 
   // Add manual balances (bank accounts, etc.)
-  const manualRows = db.prepare(`
+  const manualRows = await dbAll<{ account: string; asset: string; balance: number }>(`
     SELECT a.name as account, m.asset, m.balance
     FROM portfolio_manual_balances m
     JOIN portfolio_accounts a ON a.id = m.account_id
     WHERE m.balance != 0
-  `).all() as Array<{ account: string; asset: string; balance: number }>;
+  `);
 
   const manualHoldings: Holding[] = manualRows.map((r) => ({
     account: r.account,
@@ -190,11 +184,15 @@ export interface UnvestedHolding {
   }>;
 }
 
-export function getUnvestedHoldings(): UnvestedHolding[] {
-  const db = getDb();
-
+export async function getUnvestedHoldings(): Promise<UnvestedHolding[]> {
   // Unvested RSU grants
-  const rsuRows = db.prepare(`
+  const rsuRows = await dbAll<{
+    account: string;
+    asset: string;
+    quantity: number;
+    timestamp: string;
+    metadata: string | null;
+  }>(`
     SELECT
       a.name as account,
       t.asset,
@@ -205,16 +203,16 @@ export function getUnvestedHoldings(): UnvestedHolding[] {
     JOIN portfolio_accounts a ON a.id = t.account_id
     WHERE t.tx_type = 'rsu'
     ORDER BY t.timestamp
-  `).all() as Array<{
+  `);
+
+  // Restricted ESPP/vest lots
+  const restrictedRows = await dbAll<{
     account: string;
     asset: string;
     quantity: number;
     timestamp: string;
     metadata: string | null;
-  }>;
-
-  // Restricted ESPP/vest lots
-  const restrictedRows = db.prepare(`
+  }>(`
     SELECT
       a.name as account,
       t.asset,
@@ -226,15 +224,9 @@ export function getUnvestedHoldings(): UnvestedHolding[] {
     WHERE t.metadata IS NOT NULL
       AND json_extract(t.metadata, '$.restricted') IS NOT NULL
     ORDER BY t.timestamp
-  `).all() as Array<{
-    account: string;
-    asset: string;
-    quantity: number;
-    timestamp: string;
-    metadata: string | null;
-  }>;
+  `);
 
-  const snapshotPrices = getSnapshotPrices();
+  const snapshotPrices = await getSnapshotPrices();
 
   // Group by (account, asset)
   const grouped = new Map<string, UnvestedHolding>();

@@ -48,7 +48,7 @@ const SAMPLE_TRANSACTIONS = [
 
 export async function POST() {
   for (const tx of SAMPLE_TRANSACTIONS) {
-    logMppTransaction({
+    await logMppTransaction({
       service: tx.service,
       module: tx.module,
       endpoint: tx.endpoint ?? undefined,

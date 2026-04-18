@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { getDb } from '@/lib/db';
+import { dbGet } from '@/lib/db';
 import { fetchListingPhoto } from '@/lib/modules/housing/listing-photo';
 
 // Disk cache root. Files live under public/listing-photos/<id>.<ext>
@@ -99,12 +99,10 @@ export async function GET(
 
   // Cache miss — look up the listing and fetch via MPP.
   console.time(`[photo:${id}:dbLookup]`);
-  const db = getDb();
-  const row = db
-    .prepare(
-      'SELECT id, address, latitude, longitude FROM housing_listings WHERE id = ?'
-    )
-    .get(id) as ListingRow | undefined;
+  const row = await dbGet<ListingRow>(
+    'SELECT id, address, latitude, longitude FROM housing_listings WHERE id = ?',
+    id
+  );
   console.timeEnd(`[photo:${id}:dbLookup]`);
 
   if (!row) {

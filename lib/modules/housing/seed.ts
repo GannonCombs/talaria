@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { dbRun, dbBatch } from '@/lib/db';
 
 const AUSTIN_LISTINGS = [
   // 78745 — South Austin
@@ -83,97 +83,66 @@ const AUSTIN_MARKET_STATS = [
   { zip: '78731', median_price: 575000, median_ppsf: 295, active_listings: 76, sold_count: 28, median_dom: 24 },
 ];
 
-export function seedHousingData(): { listings: number; stats: number; neighborhoods: number; rates: number; transactions: number } {
-  const db = getDb();
-
-  const insertListing = db.prepare(
-    `INSERT OR REPLACE INTO housing_listings
-     (address, zip, price, beds, baths, sqft, lot_sqft, year_built, hoa_monthly, tax_annual, days_on_market, status, latitude, longitude)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
-  );
-
-  const insertStats = db.prepare(
-    `INSERT OR REPLACE INTO housing_market_stats
-     (zip, date, median_price, median_ppsf, active_listings, sold_count, median_dom)
-     VALUES (?, date('now'), ?, ?, ?, ?, ?)`
-  );
-
-  const insertListings = db.transaction(() => {
-    for (const l of AUSTIN_LISTINGS) {
-      insertListing.run(
+export async function seedHousingData(): Promise<{ listings: number; stats: number; neighborhoods: number; rates: number; transactions: number }> {
+  await dbBatch(
+    AUSTIN_LISTINGS.map((l) => ({
+      sql: `INSERT OR REPLACE INTO housing_listings
+       (address, zip, price, beds, baths, sqft, lot_sqft, year_built, hoa_monthly, tax_annual, days_on_market, status, latitude, longitude)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      args: [
         l.address, l.zip, l.price, l.beds, l.baths, l.sqft,
         l.lot_sqft, l.year_built, l.hoa_monthly, l.tax_annual,
-        l.days_on_market, l.latitude, l.longitude
-      );
-    }
-  });
-
-  const insertMarketStats = db.transaction(() => {
-    for (const s of AUSTIN_MARKET_STATS) {
-      insertStats.run(
-        s.zip, s.median_price, s.median_ppsf,
-        s.active_listings, s.sold_count, s.median_dom
-      );
-    }
-  });
-
-  const insertNeighborhood = db.prepare(
-    `INSERT OR REPLACE INTO housing_neighborhoods
-     (zip, walk_score, crime_index, school_rating, median_income, commute_jollyville_min, commute_downtown_min)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+        l.days_on_market, l.latitude, l.longitude,
+      ],
+    }))
   );
 
-  const insertNeighborhoods = db.transaction(() => {
-    for (const n of AUSTIN_NEIGHBORHOODS) {
-      insertNeighborhood.run(
-        n.zip, n.walk_score, n.crime_index, n.school_rating,
-        n.median_income, n.commute_jollyville_min, n.commute_downtown_min
-      );
-    }
-  });
-
-  const insertRate = db.prepare(
-    `INSERT OR REPLACE INTO housing_mortgage_rates (date, product, rate, apr, loan_amount, source)
-     VALUES (date('now'), ?, ?, ?, ?, 'seed')`
+  await dbBatch(
+    AUSTIN_MARKET_STATS.map((s) => ({
+      sql: `INSERT OR REPLACE INTO housing_market_stats
+       (zip, date, median_price, median_ppsf, active_listings, sold_count, median_dom)
+       VALUES (?, date('now'), ?, ?, ?, ?, ?)`,
+      args: [s.zip, s.median_price, s.median_ppsf, s.active_listings, s.sold_count, s.median_dom],
+    }))
   );
 
-  const insertRates = db.transaction(() => {
-    for (const r of MORTGAGE_RATES) {
-      insertRate.run(r.product, r.rate, r.apr, r.loan_amount);
-    }
-  });
+  await dbBatch(
+    AUSTIN_NEIGHBORHOODS.map((n) => ({
+      sql: `INSERT OR REPLACE INTO housing_neighborhoods
+       (zip, walk_score, crime_index, school_rating, median_income, commute_jollyville_min, commute_downtown_min)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [n.zip, n.walk_score, n.crime_index, n.school_rating, n.median_income, n.commute_jollyville_min, n.commute_downtown_min],
+    }))
+  );
 
-  const insertPrediction = db.prepare(
+  await dbBatch(
+    MORTGAGE_RATES.map((r) => ({
+      sql: `INSERT OR REPLACE INTO housing_mortgage_rates (date, product, rate, apr, loan_amount, source)
+       VALUES (date('now'), ?, ?, ?, ?, 'seed')`,
+      args: [r.product, r.rate, r.apr, r.loan_amount],
+    }))
+  );
+
+  await dbRun(
     `INSERT INTO housing_fed_predictions (date, meeting_date, cut_prob, hold_prob, hike_prob, source)
-     VALUES (date('now'), ?, ?, ?, ?, ?)`
-  );
-
-  const insertTx = db.prepare(
-    `INSERT INTO mpp_transactions (service, module, endpoint, rail, cost_usd, metadata)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-
-  const insertTransactions = db.transaction(() => {
-    for (const tx of SAMPLE_TRANSACTIONS) {
-      insertTx.run(
-        tx.service, tx.module, tx.endpoint, tx.rail, tx.costUsd,
-        tx.via ? JSON.stringify({ via: tx.via }) : null
-      );
-    }
-  });
-
-  insertListings();
-  insertMarketStats();
-  insertNeighborhoods();
-  insertRates();
-  insertPrediction.run(
+     VALUES (date('now'), ?, ?, ?, ?, ?)`,
     FED_PREDICTION.meeting_date,
     FED_PREDICTION.cut_prob,
     FED_PREDICTION.hold_prob,
     FED_PREDICTION.hike_prob,
     FED_PREDICTION.source
   );
-  insertTransactions();
+
+  await dbBatch(
+    SAMPLE_TRANSACTIONS.map((tx) => ({
+      sql: `INSERT INTO mpp_transactions (service, module, endpoint, rail, cost_usd, metadata)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [
+        tx.service, tx.module, tx.endpoint, tx.rail, tx.costUsd,
+        tx.via ? JSON.stringify({ via: tx.via }) : null,
+      ],
+    }))
+  );
 
   return {
     listings: AUSTIN_LISTINGS.length,

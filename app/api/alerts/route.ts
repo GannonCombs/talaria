@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll, dbRun } from '@/lib/db';
 
 // GET: return alert preferences
 export async function GET() {
-  const db = getDb();
+  const email = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.email'"
+  );
 
-  const email = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.email'")
-    .get() as { value: string } | undefined;
+  const minScore = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.min_score'"
+  );
 
-  const minScore = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.min_score'")
-    .get() as { value: string } | undefined;
-
-  const enabled = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.enabled'")
-    .get() as { value: string } | undefined;
+  const enabled = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.enabled'"
+  );
 
   return NextResponse.json({
     email: email?.value ?? '',
@@ -27,17 +25,14 @@ export async function GET() {
 // PUT: update alert preferences
 export async function PUT(request: NextRequest) {
   const body = await request.json();
-  const db = getDb();
 
-  const upsert = db.prepare(
-    `INSERT INTO user_preferences (key, value, updated_at)
+  const upsertSql = `INSERT INTO user_preferences (key, value, updated_at)
      VALUES (?, ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  );
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`;
 
-  if (body.email !== undefined) upsert.run('alert.email', body.email);
-  if (body.minScore !== undefined) upsert.run('alert.min_score', String(body.minScore));
-  if (body.enabled !== undefined) upsert.run('alert.enabled', String(body.enabled));
+  if (body.email !== undefined) await dbRun(upsertSql, 'alert.email', body.email);
+  if (body.minScore !== undefined) await dbRun(upsertSql, 'alert.min_score', String(body.minScore));
+  if (body.enabled !== undefined) await dbRun(upsertSql, 'alert.enabled', String(body.enabled));
 
   return NextResponse.json({ ok: true });
 }
@@ -45,19 +40,17 @@ export async function PUT(request: NextRequest) {
 // POST: trigger alert check (called by cron or manually)
 // Checks for new high-score listings and sends email if configured
 export async function POST() {
-  const db = getDb();
+  const email = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.email'"
+  );
 
-  const email = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.email'")
-    .get() as { value: string } | undefined;
+  const minScore = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.min_score'"
+  );
 
-  const minScore = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.min_score'")
-    .get() as { value: string } | undefined;
-
-  const enabled = db
-    .prepare("SELECT value FROM user_preferences WHERE key = 'alert.enabled'")
-    .get() as { value: string } | undefined;
+  const enabled = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'alert.enabled'"
+  );
 
   if (enabled?.value !== 'true' || !email?.value) {
     return NextResponse.json({ sent: false, reason: 'Alerts disabled or no email' });
@@ -66,17 +59,16 @@ export async function POST() {
   const threshold = Number(minScore?.value ?? 80);
 
   // Find listings above threshold that haven't been alerted yet
-  const newListings = db
-    .prepare(
-      `SELECT l.* FROM housing_listings l
-       WHERE l.deal_score >= ?
-       AND l.id NOT IN (
-         SELECT CAST(value AS INTEGER) FROM user_preferences WHERE key = 'alert.sent_ids'
-       )
-       ORDER BY l.deal_score DESC
-       LIMIT 5`
-    )
-    .all(threshold) as Array<{ id: number; address: string; price: number; deal_score: number }>;
+  const newListings = await dbAll<{ id: number; address: string; price: number; deal_score: number }>(
+    `SELECT l.* FROM housing_listings l
+     WHERE l.deal_score >= ?
+     AND l.id NOT IN (
+       SELECT CAST(value AS INTEGER) FROM user_preferences WHERE key = 'alert.sent_ids'
+     )
+     ORDER BY l.deal_score DESC
+     LIMIT 5`,
+    threshold
+  );
 
   if (newListings.length === 0) {
     return NextResponse.json({ sent: false, reason: 'No new listings above threshold' });

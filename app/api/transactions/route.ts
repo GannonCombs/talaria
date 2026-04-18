@@ -4,7 +4,7 @@ import { getTransactions, logMppTransaction } from '@/lib/mpp';
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
 
-  const result = getTransactions({
+  const result = await getTransactions({
     limit: Number(params.get('limit')) || 25,
     offset: Number(params.get('offset')) || 0,
     module: params.get('module') || undefined,
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  logMppTransaction({
+  await logMppTransaction({
     service: body.service,
     module: body.module,
     endpoint: body.endpoint,

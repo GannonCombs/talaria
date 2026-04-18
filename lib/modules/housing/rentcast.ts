@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll, dbBatch } from '@/lib/db';
 import { logMppTransaction } from '@/lib/mpp';
 import { paidFetch } from '@/lib/mpp-client';
 
@@ -76,7 +76,7 @@ export interface ListingFilters {
 const STATS_STALE_HOURS = 7 * 24; // 7 days
 
 export async function fetchMarketStats(zip: string): Promise<MarketStats | null> {
-  const cached = getCachedStats(zip);
+  const cached = await getCachedStats(zip);
   if (cached && !isStale(cached.fetchedAt, STATS_STALE_HOURS)) {
     return cached.stats;
   }
@@ -107,7 +107,7 @@ export async function fetchListings(
   location: ListingLocation,
   filters?: ListingFilters
 ): Promise<Listing[]> {
-  return getCachedListings(location, filters);
+  return await getCachedListings(location, filters);
 }
 
 export interface RefreshResult {
@@ -128,14 +128,12 @@ const COST_PER_PAGE = 0.033;
 // guards against two simultaneous /housing tabs both kicking off a refresh.
 let inflightRefresh: Promise<RefreshResult> | null = null;
 
-function upsertOnePage(
+async function upsertOnePage(
   records: RentcastListing[],
   fallbackCity: string,
   fallbackState: string
-): number {
-  const db = getDb();
-  const upsert = db.prepare(
-    `INSERT INTO housing_listings
+): Promise<number> {
+  const upsertSql = `INSERT INTO housing_listings
        (address, city, state, zip, price, beds, baths, sqft, lot_sqft,
         year_built, hoa_monthly, listing_url, days_on_market, status,
         latitude, longitude, last_seen, metadata)
@@ -157,14 +155,16 @@ function upsertOnePage(
        latitude = excluded.latitude,
        longitude = excluded.longitude,
        last_seen = datetime('now'),
-       metadata = excluded.metadata`
-  );
+       metadata = excluded.metadata`;
 
+  const statements: { sql: string; args: unknown[] }[] = [];
   let inserted = 0;
-  const insertMany = db.transaction((rows: RentcastListing[]) => {
-    for (const r of rows) {
-      if (!r.formattedAddress || r.price == null) continue;
-      upsert.run(
+
+  for (const r of records) {
+    if (!r.formattedAddress || r.price == null) continue;
+    statements.push({
+      sql: upsertSql,
+      args: [
         r.formattedAddress,
         r.city ?? fallbackCity,
         r.state ?? fallbackState,
@@ -189,12 +189,13 @@ function upsertOnePage(
           listedDate: r.listedDate,
           listingAgent: r.listingAgent?.name,
           listingOffice: r.listingOffice?.name,
-        })
-      );
-      inserted++;
-    }
-  });
-  insertMany(records);
+        }),
+      ],
+    });
+    inserted++;
+  }
+
+  await dbBatch(statements);
   return inserted;
 }
 
@@ -235,10 +236,10 @@ export async function refreshListingsForCity(
       const records: RentcastListing[] = Array.isArray(unwrapped) ? unwrapped : [];
       pageCount++;
 
-      const inserted = upsertOnePage(records, city, state);
+      const inserted = await upsertOnePage(records, city, state);
       totalFetched += inserted;
 
-      logMppTransaction({
+      await logMppTransaction({
         service: 'RentCast',
         module: 'housing',
         endpoint: '/rentcast/sale-listings',
@@ -312,10 +313,10 @@ export async function fetchPropertyDetails(
   address: string,
   zip: string
 ): Promise<Listing | null> {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM housing_listings WHERE address = ? AND zip = ?')
-    .get(address, zip) as Record<string, unknown> | undefined;
+  const row = await dbGet<Record<string, unknown>>(
+    'SELECT * FROM housing_listings WHERE address = ? AND zip = ?',
+    address, zip
+  );
 
   if (!row) return null;
   return mapListingRow(row);
@@ -323,14 +324,12 @@ export async function fetchPropertyDetails(
 
 // ── Cache helpers ──
 
-function getCachedStats(zip: string): { stats: MarketStats; fetchedAt: string } | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT * FROM housing_market_stats
-       WHERE zip = ? ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get(zip) as Record<string, unknown> | undefined;
+async function getCachedStats(zip: string): Promise<{ stats: MarketStats; fetchedAt: string } | null> {
+  const row = await dbGet<Record<string, unknown>>(
+    `SELECT * FROM housing_market_stats
+     WHERE zip = ? ORDER BY fetched_at DESC LIMIT 1`,
+    zip
+  );
 
   if (!row) return null;
 
@@ -348,11 +347,10 @@ function getCachedStats(zip: string): { stats: MarketStats; fetchedAt: string } 
   };
 }
 
-function getCachedListings(
+async function getCachedListings(
   location: ListingLocation,
   filters?: ListingFilters
-): Listing[] {
-  const db = getDb();
+): Promise<Listing[]> {
   // Always alias the listings table as `l` so the optional bookmarks JOIN
   // can disambiguate. Conditions all reference `l.column`.
   // Location filters are all optional. When all-empty, the query spans
@@ -433,14 +431,13 @@ function getCachedListings(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const rows = db
-    .prepare(
-      `SELECT l.* FROM housing_listings l
-       ${join}
-       ${where}
-       ORDER BY l.deal_score DESC NULLS LAST, l.price ASC`
-    )
-    .all(...params) as Record<string, unknown>[];
+  const rows = await dbAll<Record<string, unknown>>(
+    `SELECT l.* FROM housing_listings l
+     ${join}
+     ${where}
+     ORDER BY l.deal_score DESC NULLS LAST, l.price ASC`,
+    ...params
+  );
 
   return rows.map(mapListingRow);
 }

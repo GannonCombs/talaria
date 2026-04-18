@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
-import { getDb } from '../db';
+import { dbGet } from '../db';
 
 const execAsync = promisify(exec);
 
@@ -31,23 +31,23 @@ export interface ApprovalResult {
   timestamp: string;
 }
 
-function getStringPref(key: string, fallback: string): string {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT value FROM user_preferences WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+async function getStringPref(key: string, fallback: string): Promise<string> {
+  const row = await dbGet<{ value: string }>(
+    'SELECT value FROM user_preferences WHERE key = ?',
+    key
+  );
   return row?.value ?? fallback;
 }
 
-function getNumericPref(key: string, fallback: number): number {
-  const v = parseFloat(getStringPref(key, String(fallback)));
+async function getNumericPref(key: string, fallback: number): Promise<number> {
+  const v = parseFloat(await getStringPref(key, String(fallback)));
   return isNaN(v) ? fallback : v;
 }
 
 export class ApprovalManager {
   static async requestApproval(request: ApprovalRequest): Promise<ApprovalResult> {
-    const approvalMode = getStringPref('security.approval_mode', 'threshold');
-    const autoApproveUnder = getNumericPref('security.auto_approve_under', 0.05);
+    const approvalMode = await getStringPref('security.approval_mode', 'threshold');
+    const autoApproveUnder = await getNumericPref('security.auto_approve_under', 0.05);
 
     if (approvalMode === 'none') {
       return { approved: true, method: 'auto', timestamp: new Date().toISOString() };

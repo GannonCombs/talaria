@@ -2,40 +2,39 @@
 // user-configured thresholds stored in user_preferences and daily
 // stats computed from mpp_transactions (including pending rows).
 
-import { getDb } from '../db';
+import { dbGet } from '../db';
 
 export interface SpendValidation {
   valid: boolean;
   errors: string[];
 }
 
-function getNumericPref(key: string, fallback: number): number {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT value FROM user_preferences WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+async function getNumericPref(key: string, fallback: number): Promise<number> {
+  const row = await dbGet<{ value: string }>(
+    'SELECT value FROM user_preferences WHERE key = ?',
+    key
+  );
   if (!row) return fallback;
   const n = parseFloat(row.value);
   return isNaN(n) ? fallback : n;
 }
 
 export class SpendLimits {
-  static validateTransaction(amount: number): SpendValidation {
-    const db = getDb();
+  static async validateTransaction(amount: number): Promise<SpendValidation> {
     const errors: string[] = [];
 
-    const maxTransaction = getNumericPref('security.max_transaction', 1.00);
-    const dailyLimit = getNumericPref('daily_spend_limit', 5.00);
-    const maxCount = getNumericPref('security.daily_txn_count', 100);
+    const maxTransaction = await getNumericPref('security.max_transaction', 1.00);
+    const dailyLimit = await getNumericPref('daily_spend_limit', 5.00);
+    const maxCount = await getNumericPref('security.daily_txn_count', 100);
 
-    const todayStats = db.prepare(`
+    const todayStats = (await dbGet<{ spent: number; txn_count: number }>(`
       SELECT
         COALESCE(SUM(cost_usd), 0) as spent,
         COUNT(*) as txn_count
       FROM mpp_transactions
       WHERE date(timestamp, 'localtime') = date('now', 'localtime')
         AND status IN ('pending', 'completed')
-    `).get() as { spent: number; txn_count: number };
+    `))!;
 
     if (amount > maxTransaction) {
       errors.push(
@@ -56,26 +55,25 @@ export class SpendLimits {
     return { valid: errors.length === 0, errors };
   }
 
-  static getDailyStats(): {
+  static async getDailyStats(): Promise<{
     spent: number;
     limit: number;
     remaining: number;
     transactionsUsed: number;
     transactionLimit: number;
     transactionsRemaining: number;
-  } {
-    const db = getDb();
-    const dailyLimit = getNumericPref('daily_spend_limit', 5.00);
-    const maxCount = getNumericPref('security.daily_txn_count', 100);
+  }> {
+    const dailyLimit = await getNumericPref('daily_spend_limit', 5.00);
+    const maxCount = await getNumericPref('security.daily_txn_count', 100);
 
-    const stats = db.prepare(`
+    const stats = (await dbGet<{ spent: number; txn_count: number }>(`
       SELECT
         COALESCE(SUM(cost_usd), 0) as spent,
         COUNT(*) as txn_count
       FROM mpp_transactions
       WHERE date(timestamp, 'localtime') = date('now', 'localtime')
         AND status IN ('pending', 'completed')
-    `).get() as { spent: number; txn_count: number };
+    `))!;
 
     return {
       spent: stats.spent,

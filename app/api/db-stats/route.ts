@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { dbGet } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
 export async function GET() {
-  const db = getDb();
   const dbPath = path.join(process.cwd(), 'talaria.db');
 
   // File size
@@ -22,11 +21,12 @@ export async function GET() {
   let totalRows = 0;
 
   for (const table of tables) {
-    const row = db
-      .prepare(`SELECT COUNT(*) as count FROM ${table}`)
-      .get() as { count: number };
-    rowCounts[table] = row.count;
-    totalRows += row.count;
+    const row = await dbGet<{ count: number }>(
+      `SELECT COUNT(*) as count FROM ${table}`
+    );
+    const count = row?.count ?? 0;
+    rowCounts[table] = count;
+    totalRows += count;
   }
 
   return NextResponse.json({

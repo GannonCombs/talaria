@@ -4,7 +4,20 @@ import Database from 'better-sqlite3';
 let db: Database.Database;
 
 vi.mock('@/lib/db', () => ({
-  getDb: () => db,
+  dbGet: async (sql: string, ...args: unknown[]) => {
+    return db.prepare(sql).get(...args) as Record<string, unknown> | undefined;
+  },
+  dbAll: async (sql: string, ...args: unknown[]) => {
+    return db.prepare(sql).all(...args);
+  },
+  dbRun: async (sql: string, ...args: unknown[]) => {
+    const result = db.prepare(sql).run(...args);
+    return { lastInsertRowid: BigInt(result.lastInsertRowid), changes: result.changes };
+  },
+  dbExec: async (sql: string) => {
+    db.exec(sql);
+  },
+  dbBatch: async () => {},
 }));
 
 const { reserveTransaction, completeTransaction, failTransaction, getTodaySpend } =
@@ -30,8 +43,8 @@ beforeEach(() => {
 });
 
 describe('reserveTransaction', () => {
-  it('creates a pending transaction and returns its ID', () => {
-    const id = reserveTransaction({
+  it('creates a pending transaction and returns its ID', async () => {
+    const id = await reserveTransaction({
       service: 'RentCast',
       module: 'housing',
       endpoint: '/sale-listings',
@@ -40,7 +53,7 @@ describe('reserveTransaction', () => {
 
     expect(id).toBeGreaterThan(0);
 
-    const row = db.prepare('SELECT * FROM mpp_transactions WHERE id = ?').get(id) as Record<string, unknown>;
+    const row = db.prepare('SELECT * FROM mpp_transactions WHERE id = ?').get(Number(id)) as Record<string, unknown>;
     expect(row.service).toBe('RentCast');
     expect(row.module).toBe('housing');
     expect(row.endpoint).toBe('/sale-listings');
@@ -49,82 +62,82 @@ describe('reserveTransaction', () => {
     expect(row.rail).toBe('tempo');
   });
 
-  it('stores metadata as JSON', () => {
-    const id = reserveTransaction({
+  it('stores metadata as JSON', async () => {
+    const id = await reserveTransaction({
       service: 'Finnhub',
       module: 'portfolio',
       estimatedCostUsd: 0.001,
       metadata: { symbol: 'AAPL' },
     });
 
-    const row = db.prepare('SELECT metadata FROM mpp_transactions WHERE id = ?').get(id) as { metadata: string };
+    const row = db.prepare('SELECT metadata FROM mpp_transactions WHERE id = ?').get(Number(id)) as { metadata: string };
     expect(JSON.parse(row.metadata)).toEqual({ symbol: 'AAPL' });
   });
 });
 
 describe('completeTransaction', () => {
-  it('marks a pending transaction as completed', () => {
-    const id = reserveTransaction({
+  it('marks a pending transaction as completed', async () => {
+    const id = await reserveTransaction({
       service: 'test', module: 'test', estimatedCostUsd: 0.01,
     });
 
-    completeTransaction(id);
+    await completeTransaction(id);
 
-    const row = db.prepare('SELECT status FROM mpp_transactions WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM mpp_transactions WHERE id = ?').get(Number(id)) as { status: string };
     expect(row.status).toBe('completed');
   });
 
-  it('updates the cost when actual cost is provided', () => {
-    const id = reserveTransaction({
+  it('updates the cost when actual cost is provided', async () => {
+    const id = await reserveTransaction({
       service: 'test', module: 'test', estimatedCostUsd: 0.05,
     });
 
-    completeTransaction(id, 0.033);
+    await completeTransaction(id, 0.033);
 
-    const row = db.prepare('SELECT status, cost_usd FROM mpp_transactions WHERE id = ?').get(id) as { status: string; cost_usd: number };
+    const row = db.prepare('SELECT status, cost_usd FROM mpp_transactions WHERE id = ?').get(Number(id)) as { status: string; cost_usd: number };
     expect(row.status).toBe('completed');
     expect(row.cost_usd).toBe(0.033);
   });
 });
 
 describe('failTransaction', () => {
-  it('marks a pending transaction as failed', () => {
-    const id = reserveTransaction({
+  it('marks a pending transaction as failed', async () => {
+    const id = await reserveTransaction({
       service: 'test', module: 'test', estimatedCostUsd: 0.01,
     });
 
-    failTransaction(id);
+    await failTransaction(id);
 
-    const row = db.prepare('SELECT status FROM mpp_transactions WHERE id = ?').get(id) as { status: string };
+    const row = db.prepare('SELECT status FROM mpp_transactions WHERE id = ?').get(Number(id)) as { status: string };
     expect(row.status).toBe('failed');
   });
 });
 
 describe('getTodaySpend', () => {
-  it('returns 0 with no transactions', () => {
-    expect(getTodaySpend()).toBe(0);
+  it('returns 0 with no transactions', async () => {
+    expect(await getTodaySpend()).toBe(0);
   });
 
-  it('sums completed and pending transactions', () => {
-    reserveTransaction({ service: 'a', module: 'a', estimatedCostUsd: 0.01 }); // pending
-    const id = reserveTransaction({ service: 'b', module: 'b', estimatedCostUsd: 0.02 });
-    completeTransaction(id); // completed
+  it('sums completed and pending transactions', async () => {
+    await reserveTransaction({ service: 'a', module: 'a', estimatedCostUsd: 0.01 }); // pending
+    const id = await reserveTransaction({ service: 'b', module: 'b', estimatedCostUsd: 0.02 });
+    await completeTransaction(id); // completed
 
-    expect(getTodaySpend()).toBeCloseTo(0.03);
+    expect(await getTodaySpend()).toBeCloseTo(0.03);
   });
 
-  it('excludes failed transactions', () => {
-    const id = reserveTransaction({ service: 'a', module: 'a', estimatedCostUsd: 0.05 });
-    failTransaction(id);
+  it('excludes failed transactions', async () => {
+    const id = await reserveTransaction({ service: 'a', module: 'a', estimatedCostUsd: 0.05 });
+    await failTransaction(id);
 
-    expect(getTodaySpend()).toBe(0);
+    expect(await getTodaySpend()).toBe(0);
   });
 
-  it('excludes yesterday transactions', () => {
+  it('excludes yesterday transactions', async () => {
     db.prepare(
       "INSERT INTO mpp_transactions (service, module, cost_usd, status, timestamp) VALUES ('old', 'old', 1.00, 'completed', datetime('now', '-1 day'))"
     ).run();
 
-    expect(getTodaySpend()).toBe(0);
+    expect(await getTodaySpend()).toBe(0);
   });
 });

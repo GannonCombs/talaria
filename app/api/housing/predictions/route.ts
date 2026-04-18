@@ -7,7 +7,7 @@ export async function GET() {
     const prediction = await fetchFedPredictions();
     return NextResponse.json(prediction);
   } catch {
-    const cached = getLatestPrediction();
+    const cached = await getLatestPrediction();
     return NextResponse.json(cached);
   }
 }

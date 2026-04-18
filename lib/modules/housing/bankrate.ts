@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll, dbBatch } from '@/lib/db';
 import { Resolver } from 'node:dns/promises';
 import { request as httpsRequest } from 'node:https';
 
@@ -127,23 +127,17 @@ export async function fetchBankrateRates(
       });
 
     rates.sort((a, b) => a.rate - b.rate);
-    cacheRates(rates);
+    await cacheRates(rates);
     return rates;
   } catch (err) {
     console.error('Bankrate API failed:', err);
-    return getCachedRates();
+    return await getCachedRates();
   }
 }
 
 // ── Cache ──
 
-function cacheRates(rates: MortgageRate[]): void {
-  const db = getDb();
-  const stmt = db.prepare(
-    `INSERT OR REPLACE INTO housing_mortgage_rates (date, product, rate, apr, loan_amount, source)
-     VALUES (date('now'), ?, ?, ?, ?, ?)`
-  );
-
+async function cacheRates(rates: MortgageRate[]): Promise<void> {
   // Cache best rate per product only
   const best = new Map<string, MortgageRate>();
   for (const r of rates) {
@@ -152,31 +146,28 @@ function cacheRates(rates: MortgageRate[]): void {
     }
   }
 
-  const insert = db.transaction(() => {
-    for (const r of best.values()) {
-      stmt.run(r.product, r.rate, r.apr, r.loanAmount, r.source);
-    }
-  });
-
-  insert();
+  await dbBatch(
+    [...best.values()].map((r) => ({
+      sql: `INSERT OR REPLACE INTO housing_mortgage_rates (date, product, rate, apr, loan_amount, source)
+     VALUES (date('now'), ?, ?, ?, ?, ?)`,
+      args: [r.product, r.rate, r.apr, r.loanAmount, r.source],
+    }))
+  );
 }
 
-function getCachedRates(): MortgageRate[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT product, rate, apr, loan_amount, source
-       FROM housing_mortgage_rates
-       WHERE date >= date('now', '-1 day')
-       ORDER BY rate ASC`
-    )
-    .all() as Array<{
-      product: string;
-      rate: number;
-      apr: number;
-      loan_amount: number;
-      source: string;
-    }>;
+async function getCachedRates(): Promise<MortgageRate[]> {
+  const rows = await dbAll<{
+    product: string;
+    rate: number;
+    apr: number;
+    loan_amount: number;
+    source: string;
+  }>(
+    `SELECT product, rate, apr, loan_amount, source
+     FROM housing_mortgage_rates
+     WHERE date >= date('now', '-1 day')
+     ORDER BY rate ASC`
+  );
 
   return rows.map((r) => ({
     product: r.product,
@@ -190,22 +181,20 @@ function getCachedRates(): MortgageRate[] {
   }));
 }
 
-export function getLatestRate(product: string): MortgageRate | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT product, rate, apr, loan_amount, source
-       FROM housing_mortgage_rates
-       WHERE product = ?
-       ORDER BY fetched_at DESC LIMIT 1`
-    )
-    .get(product) as {
-      product: string;
-      rate: number;
-      apr: number;
-      loan_amount: number;
-      source: string;
-    } | undefined;
+export async function getLatestRate(product: string): Promise<MortgageRate | null> {
+  const row = await dbGet<{
+    product: string;
+    rate: number;
+    apr: number;
+    loan_amount: number;
+    source: string;
+  }>(
+    `SELECT product, rate, apr, loan_amount, source
+     FROM housing_mortgage_rates
+     WHERE product = ?
+     ORDER BY fetched_at DESC LIMIT 1`,
+    product
+  );
 
   if (!row) return null;
 
@@ -221,21 +210,18 @@ export function getLatestRate(product: string): MortgageRate | null {
   };
 }
 
-export function getBestRate(): MortgageRate | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT product, rate, apr, loan_amount, source
-       FROM housing_mortgage_rates
-       ORDER BY rate ASC LIMIT 1`
-    )
-    .get() as {
-      product: string;
-      rate: number;
-      apr: number;
-      loan_amount: number;
-      source: string;
-    } | undefined;
+export async function getBestRate(): Promise<MortgageRate | null> {
+  const row = await dbGet<{
+    product: string;
+    rate: number;
+    apr: number;
+    loan_amount: number;
+    source: string;
+  }>(
+    `SELECT product, rate, apr, loan_amount, source
+     FROM housing_mortgage_rates
+     ORDER BY rate ASC LIMIT 1`
+  );
 
   if (!row) return null;
 

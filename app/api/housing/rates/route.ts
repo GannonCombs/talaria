@@ -17,6 +17,6 @@ export async function GET(request: NextRequest) {
   }
 
   const product = params.get('product') || '30yr_fixed';
-  const rate = getLatestRate(product);
+  const rate = await getLatestRate(product);
   return NextResponse.json(rate);
 }

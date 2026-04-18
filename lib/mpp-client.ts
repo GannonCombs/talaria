@@ -10,7 +10,7 @@
 // these to the client. Do not import this module from client components.
 import { Mppx, tempo } from 'mppx/client';
 import { privateKeyToAccount } from 'viem/accounts';
-import { getDb } from './db';
+import { dbGet, dbRun } from './db';
 import { logMppTransaction, reserveTransaction, completeTransaction, failTransaction } from './mpp';
 import { KeychainManager } from './security/keychain';
 import { SpendLimits } from './security/limits';
@@ -147,7 +147,7 @@ export async function paidFetch(
   const cost = opts?.estimatedCost ?? estimateCost(url);
 
   // 1. Validate against hard limits
-  const validation = SpendLimits.validateTransaction(cost);
+  const validation = await SpendLimits.validateTransaction(cost);
   if (!validation.valid) {
     throw new SpendLimitError(validation.errors);
   }
@@ -164,7 +164,7 @@ export async function paidFetch(
   }
 
   // 3. Reserve transaction (pending — counts toward daily limits)
-  const txId = reserveTransaction({
+  const txId = await reserveTransaction({
     service: opts?.service ?? extractServiceName(url),
     module: opts?.module ?? 'unknown',
     endpoint: opts?.endpoint,
@@ -175,10 +175,10 @@ export async function paidFetch(
   try {
     const client = await getMppxClient();
     const res = await client.fetch(url, init);
-    completeTransaction(txId, cost);
+    await completeTransaction(txId, cost);
     return res;
   } catch (e) {
-    failTransaction(txId);
+    await failTransaction(txId);
     throw e;
   }
 }
@@ -197,20 +197,18 @@ interface CacheEntry {
   expires_at: string | null;
 }
 
-export function getCached(cacheKey: string): string | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT response, expires_at FROM mpp_cache WHERE cache_key = ?`
-    )
-    .get(cacheKey) as Pick<CacheEntry, 'response' | 'expires_at'> | undefined;
+export async function getCached(cacheKey: string): Promise<string | null> {
+  const row = await dbGet<Pick<CacheEntry, 'response' | 'expires_at'>>(
+    `SELECT response, expires_at FROM mpp_cache WHERE cache_key = ?`,
+    cacheKey
+  );
 
   if (!row) return null;
 
   if (row.expires_at) {
     const expires = new Date(row.expires_at).getTime();
     if (Date.now() > expires) {
-      db.prepare('DELETE FROM mpp_cache WHERE cache_key = ?').run(cacheKey);
+      await dbRun('DELETE FROM mpp_cache WHERE cache_key = ?', cacheKey);
       return null;
     }
   }
@@ -218,18 +216,18 @@ export function getCached(cacheKey: string): string | null {
   return row.response;
 }
 
-function setCache(
+async function setCache(
   cacheKey: string,
   endpoint: string,
   response: string,
   costUsd: number,
   expiresAt: string | null
-): void {
-  const db = getDb();
-  db.prepare(
+): Promise<void> {
+  await dbRun(
     `INSERT OR REPLACE INTO mpp_cache (cache_key, endpoint, response, cost_usd, expires_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(cacheKey, endpoint, response, costUsd, expiresAt);
+     VALUES (?, ?, ?, ?, ?)`,
+    cacheKey, endpoint, response, costUsd, expiresAt
+  );
 }
 
 export interface CachedMppCallOptions {
@@ -246,7 +244,7 @@ export interface CachedMppCallOptions {
 // JSON-only convenience wrapper around paidFetch + caching. For text
 // endpoints (geocoding, search, etc.). Returns parsed JSON.
 export async function cachedMppCall(opts: CachedMppCallOptions): Promise<unknown> {
-  const cached = getCached(opts.cacheKey);
+  const cached = await getCached(opts.cacheKey);
   if (cached) {
     return JSON.parse(cached);
   }
@@ -272,9 +270,9 @@ export async function cachedMppCall(opts: CachedMppCallOptions): Promise<unknown
   const expiresAt = opts.expiresInDays !== undefined && opts.expiresInDays !== null
     ? new Date(Date.now() + opts.expiresInDays * 24 * 60 * 60 * 1000).toISOString()
     : null;
-  setCache(opts.cacheKey, opts.endpoint, responseStr, 0, expiresAt);
+  await setCache(opts.cacheKey, opts.endpoint, responseStr, 0, expiresAt);
 
-  logMppTransaction({
+  await logMppTransaction({
     service: opts.service,
     module: opts.module,
     endpoint: opts.endpoint,

@@ -52,7 +52,7 @@ interface TextSearchResponse {
 async function searchPlace(address: string): Promise<TextSearchResult | null> {
   const url = `${GOOGLE_MAPS_BASE}/maps/place/textsearch/json?query=${encodeURIComponent(address)}`;
   const res = await paidFetch(url, { method: 'GET' });
-  logMppTransaction({
+  await logMppTransaction({
     service: 'Google Maps',
     module: 'housing',
     endpoint: '/maps/place/textsearch/json',
@@ -72,7 +72,7 @@ async function searchPlace(address: string): Promise<TextSearchResult | null> {
 async function fetchPlacePhoto(photoReference: string): Promise<PhotoResult> {
   const url = `${GOOGLE_MAPS_BASE}/maps/place/photo?photoreference=${encodeURIComponent(photoReference)}&maxwidth=800`;
   const res = await paidFetch(url, { method: 'GET' });
-  logMppTransaction({
+  await logMppTransaction({
     service: 'Google Maps',
     module: 'housing',
     endpoint: '/maps/place/photo',
@@ -138,7 +138,7 @@ async function fetchStreetView(
 
   const url = `${GOOGLE_MAPS_BASE}/maps/streetview?location=${lat},${lng}&size=800x500&radius=50&source=outdoor`;
   const res = await paidFetch(url, { method: 'GET' });
-  logMppTransaction({
+  await logMppTransaction({
     service: 'Google Maps',
     module: 'housing',
     endpoint: '/maps/streetview',

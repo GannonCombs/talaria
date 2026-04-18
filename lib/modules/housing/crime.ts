@@ -8,7 +8,7 @@
 // No normalization at storage time — raw counts are preserved.
 // The scoring algorithm normalizes across all listings at score time.
 
-import { getDb } from '@/lib/db';
+import { dbAll, dbBatch } from '@/lib/db';
 import { setWiredDimension } from './scoring';
 
 const AUSTIN_CRIME_API = 'https://data.austintexas.gov/resource/fdj4-gpfu.json';
@@ -112,35 +112,32 @@ export async function fetchCrimeData(): Promise<{
     getCrimeCounts(),
   ]);
 
-  const db = getDb();
-
   // Load all listings with coordinates
-  const listings = db
-    .prepare('SELECT id, latitude, longitude FROM housing_listings WHERE latitude IS NOT NULL AND longitude IS NOT NULL')
-    .all() as Array<{ id: number; latitude: number; longitude: number }>;
+  const listings = await dbAll<{ id: number; latitude: number; longitude: number }>(
+    'SELECT id, latitude, longitude FROM housing_listings WHERE latitude IS NOT NULL AND longitude IS NOT NULL'
+  );
 
   // For each listing, find nearest block group and look up its crime count
-  const update = db.prepare('UPDATE housing_listings SET crime_count = ? WHERE id = ?');
+  const statements: { sql: string; args: unknown[] }[] = [];
   let updated = 0;
 
-  const updateAll = db.transaction(() => {
-    for (const listing of listings) {
-      const nearest = findNearestBlockGroup(listing.latitude, listing.longitude, centroids);
-      if (!nearest) continue;
+  for (const listing of listings) {
+    const nearest = findNearestBlockGroup(listing.latitude, listing.longitude, centroids);
+    if (!nearest) continue;
 
-      // Convert TIGERweb 12-char GEOID to APD 10-char format
-      // TIGERweb: "484530319002" → APD: "4530319002" (drop state prefix "48")
-      const apdKey = nearest.geoid.slice(2);
-      const count = crimeCounts.get(apdKey) ?? 0;
+    // Convert TIGERweb 12-char GEOID to APD 10-char format
+    // TIGERweb: "484530319002" → APD: "4530319002" (drop state prefix "48")
+    const apdKey = nearest.geoid.slice(2);
+    const count = crimeCounts.get(apdKey) ?? 0;
 
-      update.run(count, listing.id);
-      updated++;
-    }
-  });
-  updateAll();
+    statements.push({ sql: 'UPDATE housing_listings SET crime_count = ? WHERE id = ?', args: [count, listing.id] });
+    updated++;
+  }
+
+  await dbBatch(statements);
 
   // Mark crime as wired
-  setWiredDimension('crime');
+  await setWiredDimension('crime');
 
   return {
     listingsUpdated: updated,

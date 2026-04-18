@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db';
+import { dbGet, dbAll, dbRun, dbBatch } from '@/lib/db';
 import { calculateMortgage } from './mortgage';
 
 export interface ScoringWeights {
@@ -101,13 +101,12 @@ export function computeListingScore(
 
 // ── Wired dimensions tracking ───────────────────────────────────────────
 
-export function getWiredDimensions(): Set<string> {
-  const db = getDb();
+export async function getWiredDimensions(): Promise<Set<string>> {
   const wired = new Set<string>();
   try {
-    const row = db
-      .prepare("SELECT value FROM user_preferences WHERE key = 'housing.wired_dimensions'")
-      .get() as { value: string } | undefined;
+    const row = await dbGet<{ value: string }>(
+      "SELECT value FROM user_preferences WHERE key = 'housing.wired_dimensions'"
+    );
     if (row?.value) {
       for (const d of JSON.parse(row.value) as string[]) wired.add(d);
     }
@@ -115,27 +114,26 @@ export function getWiredDimensions(): Set<string> {
   return wired;
 }
 
-export function setWiredDimension(dimension: string): void {
-  const db = getDb();
-  const current = getWiredDimensions();
+export async function setWiredDimension(dimension: string): Promise<void> {
+  const current = await getWiredDimensions();
   current.add(dimension);
-  db.prepare(
-    "INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES ('housing.wired_dimensions', ?, datetime('now'))"
-  ).run(JSON.stringify([...current]));
+  await dbRun(
+    "INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES ('housing.wired_dimensions', ?, datetime('now'))",
+    JSON.stringify([...current])
+  );
 }
 
 // ── Batch compute and store ─────────────────────────────────────────────
 
-export function computeAllScores(weights: ScoringWeights, userBudget: number, currentRate: number): {
+export async function computeAllScores(weights: ScoringWeights, userBudget: number, currentRate: number): Promise<{
   listings: number;
-} {
-  const db = getDb();
-  const wiredDimensions = getWiredDimensions();
+}> {
+  const wiredDimensions = await getWiredDimensions();
 
   // Load all listings with their raw score data
-  const rows = db
-    .prepare('SELECT id, price, crime_count, hoa_monthly, tax_annual FROM housing_listings')
-    .all() as Array<{ id: number; price: number; crime_count: number | null; hoa_monthly: number; tax_annual: number }>;
+  const rows = await dbAll<{ id: number; price: number; crime_count: number | null; hoa_monthly: number; tax_annual: number }>(
+    'SELECT id, price, crime_count, hoa_monthly, tax_annual FROM housing_listings'
+  );
 
   if (rows.length === 0) return { listings: 0 };
 
@@ -147,28 +145,25 @@ export function computeAllScores(weights: ScoringWeights, userBudget: number, cu
 
   const minMax = buildMinMax(scoreData, wiredDimensions);
 
-  const updateListing = db.prepare(
-    'UPDATE housing_listings SET deal_score = ?, monthly_cost = ? WHERE id = ?'
-  );
+  const statements = rows.map((row, i) => {
+    const score = computeListingScore(scoreData[i], weights, wiredDimensions, minMax);
 
-  const updateAll = db.transaction(() => {
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const score = computeListingScore(scoreData[i], weights, wiredDimensions, minMax);
+    const mortgage = calculateMortgage({
+      homePrice: row.price,
+      downPaymentPct: 20,
+      interestRate: currentRate,
+      loanTermYears: 30,
+      annualPropertyTax: row.tax_annual,
+      monthlyHoa: row.hoa_monthly,
+    });
 
-      const mortgage = calculateMortgage({
-        homePrice: row.price,
-        downPaymentPct: 20,
-        interestRate: currentRate,
-        loanTermYears: 30,
-        annualPropertyTax: row.tax_annual,
-        monthlyHoa: row.hoa_monthly,
-      });
-
-      updateListing.run(score, mortgage.total_monthly, row.id);
-    }
+    return {
+      sql: 'UPDATE housing_listings SET deal_score = ?, monthly_cost = ? WHERE id = ?',
+      args: [score, mortgage.total_monthly, row.id],
+    };
   });
-  updateAll();
+
+  await dbBatch(statements);
 
   return { listings: rows.length };
 }
