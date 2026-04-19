@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import BackButton from '@/components/layout/BackButton';
-import { Plus, Flag, RotateCcw, Dumbbell, Check } from 'lucide-react';
+import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays } from 'lucide-react';
+import { DEMO_MODE } from '@/lib/config';
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -160,6 +161,172 @@ function SetBubble({
   );
 }
 
+/* ── Demo data ────────────────────────────────────────────────────── */
+
+function generateDemoWorkouts(): WorkoutLog[] {
+  const demos: WorkoutLog[] = [];
+  const today = new Date();
+  const splits = ['Chest + Tri', 'Back + Bi', 'Legs'];
+  let splitIdx = 0;
+  let id = 1000;
+
+  // Generate ~6 months of realistic workout history
+  // Pattern: 4-5 days on, 1-2 days off, occasional cardio
+  for (let daysAgo = 180; daysAgo >= 0; daysAgo--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - daysAgo);
+    const dateStr = d.toISOString().split('T')[0];
+    const dow = d.getDay(); // 0=Sun
+
+    // Rest on most Sundays and some Wednesdays
+    if (dow === 0 && Math.random() > 0.2) continue;
+    if (dow === 3 && Math.random() > 0.5) continue;
+
+    // Random skip days (~15% chance)
+    if (Math.random() < 0.15) continue;
+
+    // Saturday is often cardio
+    if (dow === 6 && Math.random() > 0.4) {
+      demos.push({
+        id: id++, date: dateStr, type: 'cardio', activity: 'run',
+        split_name: null, duration_minutes: 20 + Math.floor(Math.random() * 25),
+        distance_miles: +(1.5 + Math.random() * 2.5).toFixed(1), notes: null,
+      });
+      continue;
+    }
+
+    // Weights day — rotate splits
+    demos.push({
+      id: id++, date: dateStr, type: 'weights', activity: 'split',
+      split_name: splits[splitIdx % 3], duration_minutes: null,
+      distance_miles: null, notes: null,
+    });
+    splitIdx++;
+  }
+
+  return demos;
+}
+
+/* ── Heatmap component ────────────────────────────────────────────── */
+
+function Heatmap({ workouts }: { workouts: WorkoutLog[] }) {
+  // Build a map of date → workout type
+  const dateMap = new Map<string, 'weights' | 'cardio'>();
+  for (const w of workouts) {
+    // First workout of the day wins (weights > cardio priority)
+    const existing = dateMap.get(w.date);
+    if (!existing || (w.type === 'weights' && existing === 'cardio')) {
+      dateMap.set(w.date, w.type === 'weights' ? 'weights' : 'cardio');
+    }
+  }
+
+  // Build 365 days ending today
+  const today = new Date();
+  const days: { date: string; type: 'weights' | 'cardio' | null; dayOfWeek: number }[] = [];
+  for (let i = 364; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    days.push({
+      date: dateStr,
+      type: dateMap.get(dateStr) ?? null,
+      dayOfWeek: d.getDay(),
+    });
+  }
+
+  // Group into weeks (columns of 7)
+  const weeks: typeof days[] = [];
+  // Pad the first week so it starts on Sunday
+  const firstDow = days[0].dayOfWeek;
+  if (firstDow > 0) {
+    const padded = Array.from({ length: firstDow }, () => ({ date: '', type: null as null, dayOfWeek: 0 }));
+    const firstWeek = [...padded, ...days.slice(0, 7 - firstDow)];
+    weeks.push(firstWeek);
+    let idx = 7 - firstDow;
+    while (idx < days.length) {
+      weeks.push(days.slice(idx, idx + 7));
+      idx += 7;
+    }
+  } else {
+    let idx = 0;
+    while (idx < days.length) {
+      weeks.push(days.slice(idx, idx + 7));
+      idx += 7;
+    }
+  }
+
+  // Month labels
+  const monthLabels: { label: string; weekIdx: number }[] = [];
+  let lastMonth = -1;
+  for (let w = 0; w < weeks.length; w++) {
+    const firstReal = weeks[w].find((d) => d.date);
+    if (firstReal?.date) {
+      const month = new Date(firstReal.date).getMonth();
+      if (month !== lastMonth) {
+        monthLabels.push({ label: new Date(firstReal.date).toLocaleString('en-US', { month: 'short' }), weekIdx: w });
+        lastMonth = month;
+      }
+    }
+  }
+
+  function getCellColor(type: 'weights' | 'cardio' | null): string {
+    if (!type) return 'bg-surface-container-high';
+    if (type === 'weights') return 'bg-primary';
+    return 'bg-secondary';
+  }
+
+  const workoutDays = days.filter((d) => d.type).length;
+
+  return (
+    <div className="bg-surface-container-low border border-outline p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <CalendarDays size={16} className="text-primary" strokeWidth={1.5} />
+          <span className="text-sm font-bold text-on-surface">Activity</span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] text-on-surface-variant">
+          <span className="font-mono">{workoutDays} days</span>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 bg-surface-container-high" />
+            <div className="w-2 h-2 bg-primary/30" />
+            <div className="w-2 h-2 bg-primary" />
+            <div className="w-2 h-2 bg-secondary" />
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto pb-1">
+        <div className="inline-flex gap-[3px] min-w-max">
+          {weeks.map((week, wIdx) => (
+            <div key={wIdx} className="flex flex-col gap-[3px]">
+              {week.map((day, dIdx) => (
+                <div
+                  key={dIdx}
+                  className={`w-[11px] h-[11px] ${day.date ? getCellColor(day.type) : 'bg-transparent'}`}
+                  title={day.date ? `${day.date}${day.type ? ` — ${day.type}` : ''}` : ''}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Month labels */}
+      <div className="relative mt-1" style={{ height: 14 }}>
+        {monthLabels.map((m) => (
+          <span
+            key={m.weekIdx}
+            className="absolute text-[9px] font-mono text-on-surface-variant"
+            style={{ left: m.weekIdx * 14 }}
+          >
+            {m.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Main component ───────────────────────────────────────────────── */
 
 export default function FitnessTrackerPage() {
@@ -179,7 +346,13 @@ export default function FitnessTrackerPage() {
 
   useEffect(() => {
     fetch('/api/fitness/splits').then((r) => r.json()).then((d) => { setSplits(d.splits); setCurrentSplitIndex(d.currentSplitIndex ?? 0); }).catch(() => {});
-    fetch('/api/fitness/workouts').then((r) => r.json()).then(setWorkouts).catch(() => {});
+    fetch('/api/fitness/workouts').then((r) => r.json()).then((real: WorkoutLog[]) => {
+      if (DEMO_MODE) {
+        setWorkouts([...real, ...generateDemoWorkouts()]);
+      } else {
+        setWorkouts(real);
+      }
+    }).catch(() => {});
   }, []);
 
   const todaySplit = splits[currentSplitIndex] ?? null;
@@ -393,6 +566,8 @@ export default function FitnessTrackerPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-on-surface">Fitness</h1>
         </div>
       </div>
+
+      <Heatmap workouts={workouts} />
 
       {todaySplit && (
         <div className="bg-surface-container-low border border-outline p-5 mb-6">
