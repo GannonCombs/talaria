@@ -2,8 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import BackButton from '@/components/layout/BackButton';
-import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays } from 'lucide-react';
+import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays, TrendingUp } from 'lucide-react';
 import { DEMO_MODE } from '@/lib/config';
+import SafeChart from '@/components/shared/SafeChart';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts';
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -11,7 +13,7 @@ interface SplitExercise { name: string; sets: number; reps: number; weight: numb
 interface Split { id: number; name: string; muscle_groups: string[]; rotation_order: number; exercises: SplitExercise[]; }
 interface ActiveSet { reps: number; weight: number; confirmed: boolean; }
 interface ActiveExercise { name: string; sets: ActiveSet[]; }
-interface WorkoutLog { id: number; date: string; type: string; activity: string; split_name: string | null; duration_minutes: number | null; distance_miles: number | null; notes: string | null; }
+interface WorkoutLog { id: number; date: string; type: string; activity: string; split_name: string | null; duration_minutes: number | null; distance_miles: number | null; notes: string | null; score?: number; }
 
 type PageState = 'idle' | 'active' | 'cardio';
 
@@ -161,6 +163,144 @@ function SetBubble({
   );
 }
 
+/* ── Score Timeline component ─────────────────────────────────────── */
+
+function ScoreTimeline({ workouts }: { workouts: WorkoutLog[] }) {
+  const [range, setRange] = useState<'1M' | '3M' | '6M'>('3M');
+
+  const rangeDays = range === '1M' ? 30 : range === '3M' ? 90 : 180;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - rangeDays);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+
+  // Filter to workouts with scores in range, sorted by date
+  const scored = workouts
+    .filter((w) => w.score != null && w.date >= cutoffStr)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (scored.length === 0) return null;
+
+  // Compute 7-day rolling average
+  const chartData = scored.map((w, i) => {
+    const windowStart = Math.max(0, i - 6);
+    const window = scored.slice(windowStart, i + 1);
+    const avg = window.reduce((s, x) => s + (x.score ?? 0), 0) / window.length;
+    return {
+      date: w.date,
+      score: w.score!,
+      avg: +avg.toFixed(2),
+      type: w.type,
+    };
+  });
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const latestScore = chartData[chartData.length - 1]?.score ?? 0;
+  const latestAvg = chartData[chartData.length - 1]?.avg ?? 0;
+
+  return (
+    <div className="bg-surface-container-low border border-outline p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={16} className="text-primary" strokeWidth={1.5} />
+          <span className="text-sm font-bold text-on-surface">Performance</span>
+          <span className="text-xs text-on-surface-variant font-mono ml-2">
+            {latestScore.toFixed(1)} latest · {latestAvg.toFixed(1)} avg
+          </span>
+        </div>
+        <div className="flex gap-1">
+          {(['1M', '3M', '6M'] as const).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              className={`px-2 py-1 text-[10px] font-bold transition-colors ${
+                range === r
+                  ? 'bg-primary text-on-primary'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <SafeChart className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+            <defs>
+              <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#46f1c5" stopOpacity={0.2} />
+                <stop offset="100%" stopColor="#46f1c5" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatDate}
+              tick={{ fontSize: 9, fill: '#8b949e', fontFamily: 'var(--font-mono)' }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={40}
+            />
+            <YAxis
+              domain={[0, 10]}
+              tick={{ fontSize: 9, fill: '#8b949e', fontFamily: 'var(--font-mono)' }}
+              axisLine={false}
+              tickLine={false}
+              tickCount={6}
+            />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.[0]) return null;
+                const d = payload[0].payload;
+                return (
+                  <div className="bg-surface-container border border-outline px-3 py-2 text-xs">
+                    <div className="font-mono text-on-surface-variant">{formatDate(d.date)}</div>
+                    <div className="font-mono text-primary font-bold">{d.score.toFixed(2)}</div>
+                    <div className="font-mono text-on-surface-variant">7d avg: {d.avg.toFixed(2)}</div>
+                  </div>
+                );
+              }}
+            />
+            <Area
+              type="monotone"
+              dataKey="score"
+              stroke="#46f1c5"
+              strokeWidth={1.5}
+              fill="url(#scoreGradient)"
+              dot={{ r: 1.5, fill: '#46f1c5', strokeWidth: 0 }}
+              activeDot={{ r: 4, fill: '#46f1c5', stroke: '#10141a', strokeWidth: 2 }}
+            />
+            <Line
+              type="monotone"
+              dataKey="avg"
+              stroke="#8b949e"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              dot={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </SafeChart>
+
+      <div className="flex items-center gap-4 mt-2 text-[10px] text-on-surface-variant">
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-[2px] bg-primary" />
+          Daily
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-[2px] bg-on-surface-variant" style={{ borderTop: '1px dashed' }} />
+          7D Avg
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Demo data ────────────────────────────────────────────────────── */
 
 function generateDemoWorkouts(): WorkoutLog[] {
@@ -171,35 +311,52 @@ function generateDemoWorkouts(): WorkoutLog[] {
   let id = 1000;
 
   // Generate ~6 months of realistic workout history
-  // Pattern: 4-5 days on, 1-2 days off, occasional cardio
+  // Scores trend upward: ~3.5 at start → ~7.0 by today, with daily noise
+  // Use a seeded-ish approach (deterministic per daysAgo) for stable renders
   for (let daysAgo = 180; daysAgo >= 0; daysAgo--) {
     const d = new Date(today);
     d.setDate(d.getDate() - daysAgo);
     const dateStr = d.toISOString().split('T')[0];
-    const dow = d.getDay(); // 0=Sun
+    const dow = d.getDay();
+
+    // Deterministic "random" based on day number for stable renders
+    const seed = (daysAgo * 7 + 13) % 100;
 
     // Rest on most Sundays and some Wednesdays
-    if (dow === 0 && Math.random() > 0.2) continue;
-    if (dow === 3 && Math.random() > 0.5) continue;
+    if (dow === 0 && seed > 20) continue;
+    if (dow === 3 && seed > 50) continue;
 
     // Random skip days (~15% chance)
-    if (Math.random() < 0.15) continue;
+    if (seed < 15 && dow !== 1 && dow !== 4) continue;
+
+    // Progress factor: 0.0 at 180 days ago → 1.0 today
+    const progress = (180 - daysAgo) / 180;
 
     // Saturday is often cardio
-    if (dow === 6 && Math.random() > 0.4) {
+    if (dow === 6 && seed > 40) {
+      const duration = 20 + (seed % 25);
+      const cardioScore = +(2.5 + progress * 2.5 + (seed % 20 - 10) * 0.1).toFixed(2);
       demos.push({
         id: id++, date: dateStr, type: 'cardio', activity: 'run',
-        split_name: null, duration_minutes: 20 + Math.floor(Math.random() * 25),
-        distance_miles: +(1.5 + Math.random() * 2.5).toFixed(1), notes: null,
+        split_name: null, duration_minutes: duration,
+        distance_miles: +(1.5 + (seed % 30) * 0.08).toFixed(1), notes: null,
+        score: Math.max(1.5, Math.min(9.0, cardioScore)),
       });
       continue;
     }
 
-    // Weights day — rotate splits
+    // Weights day — score trends up with noise
+    const baseScore = 3.0 + progress * 3.5; // 3.0 → 6.5
+    const noise = ((seed % 30) - 15) * 0.08; // ±1.2
+    // Occasional great day (seed 90-99) or bad day (seed 0-5)
+    const bonus = seed >= 93 ? 1.5 : seed <= 4 ? -1.5 : 0;
+    const score = +(baseScore + noise + bonus).toFixed(2);
+
     demos.push({
       id: id++, date: dateStr, type: 'weights', activity: 'split',
       split_name: splits[splitIdx % 3], duration_minutes: null,
       distance_miles: null, notes: null,
+      score: Math.max(1.0, Math.min(9.5, score)),
     });
     splitIdx++;
   }
@@ -568,6 +725,7 @@ export default function FitnessTrackerPage() {
       </div>
 
       <Heatmap workouts={workouts} />
+      <ScoreTimeline workouts={workouts} />
 
       {todaySplit && (
         <div className="bg-surface-container-low border border-outline p-5 mb-6">
