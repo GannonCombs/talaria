@@ -500,9 +500,15 @@ export default function FitnessTrackerPage() {
   const [saving, setSaving] = useState(false);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [cardioStatus, setCardioStatus] = useState('');
+  const [knownActivities, setKnownActivities] = useState<string[]>([]);
+  const [activityInput, setActivityInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const DEFAULT_ACTIVITIES = ['Run', 'Walk', 'Bike', 'Rock Climbing', 'Swimming', 'Hiking', 'Yoga', 'Stretching'];
 
   useEffect(() => {
     fetch('/api/fitness/splits').then((r) => r.json()).then((d) => { setSplits(d.splits); setCurrentSplitIndex(d.currentSplitIndex ?? 0); }).catch(() => {});
+    fetch('/api/fitness/workouts?distinct=activities').then((r) => r.json()).then((acts: string[]) => setKnownActivities(acts)).catch(() => {});
     fetch('/api/fitness/workouts').then((r) => r.json()).then((real: WorkoutLog[]) => {
       if (DEMO_MODE) {
         setWorkouts([...real, ...generateDemoWorkouts()]);
@@ -605,8 +611,19 @@ export default function FitnessTrackerPage() {
   const saveCardio = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); setCardioStatus('Saving...');
     try {
-      const res = await fetch('/api/fitness/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activity: data.get('activity') ?? 'run', duration_minutes: (data.get('duration') || data.get('seconds')) ? (parseFloat(data.get('duration') as string || '0') + parseFloat(data.get('seconds') as string || '0') / 60) : null, distance_miles: data.get('distance') ? parseFloat(data.get('distance') as string) : null, notes: data.get('notes') || null }) });
-      if (res.ok) { const saved = await res.json(); setWorkouts((prev) => [saved, ...prev]); form.reset(); setCardioStatus('Saved!'); setPageState('idle'); setTimeout(() => setCardioStatus(''), 2000); }
+      const activity = activityInput.trim() || (data.get('activity') as string) || 'run';
+      const res = await fetch('/api/fitness/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activity, duration_minutes: (data.get('duration') || data.get('seconds')) ? (parseFloat(data.get('duration') as string || '0') + parseFloat(data.get('seconds') as string || '0') / 60) : null, distance_miles: data.get('distance') ? parseFloat(data.get('distance') as string) : null, notes: data.get('notes') || null }) });
+      if (res.ok) {
+        const saved = await res.json();
+        setWorkouts((prev) => [saved, ...prev]);
+        form.reset();
+        setActivityInput('');
+        setCardioStatus('Saved!');
+        setPageState('idle');
+        // Refresh known activities so new ones show next time
+        fetch('/api/fitness/workouts?distinct=activities').then((r) => r.json()).then(setKnownActivities).catch(() => {});
+        setTimeout(() => setCardioStatus(''), 2000);
+      }
     } catch { setCardioStatus('Error'); }
   };
 
@@ -679,33 +696,61 @@ export default function FitnessTrackerPage() {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // CARDIO FORM
+  // LOG ACTIVITY FORM
   // ══════════════════════════════════════════════════════════════════
   if (pageState === 'cardio') {
+    // Merge known activities with defaults, deduplicate
+    const allSuggestions = [...new Set([...knownActivities, ...DEFAULT_ACTIVITIES])];
+    const filtered = activityInput.length > 0
+      ? allSuggestions.filter((a) => a.toLowerCase().includes(activityInput.toLowerCase()))
+      : allSuggestions;
+
     return (
       <>
         <div className="mb-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => setPageState('idle')} className="text-on-surface-variant hover:text-white">
+            <button onClick={() => { setPageState('idle'); setActivityInput(''); setShowSuggestions(false); }} className="text-on-surface-variant hover:text-white">
               <RotateCcw size={20} />
             </button>
-            <h1 className="text-2xl font-bold tracking-tight text-on-surface">Log Cardio</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-on-surface">Log Activity</h1>
           </div>
         </div>
         <form onSubmit={saveCardio} className="bg-surface-container-low border border-outline p-5 mb-6">
-          <div className="mb-4">
+          {/* Activity with autocomplete */}
+          <div className="mb-4 relative">
             <label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Activity</label>
-            <select name="activity" defaultValue="run" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base text-on-surface focus:border-primary focus:outline-none">
-              <option value="run">Run</option><option value="walk">Walk</option><option value="bike">Bike</option><option value="other">Other</option>
-            </select>
+            <input
+              type="text"
+              name="activity"
+              value={activityInput}
+              onChange={(e) => { setActivityInput(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
+              placeholder="e.g. Rock Climbing, Run, Yoga"
+              autoComplete="off"
+              className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base text-on-surface focus:border-primary focus:outline-none"
+            />
+            {showSuggestions && filtered.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-1 bg-surface-container border border-outline max-h-48 overflow-y-auto">
+                {filtered.slice(0, 8).map((activity) => (
+                  <button
+                    key={activity}
+                    type="button"
+                    onClick={() => { setActivityInput(activity); setShowSuggestions(false); }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-on-surface hover:bg-surface-container-high transition-colors"
+                  >
+                    {activity}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Minutes</label><input type="number" name="duration" inputMode="numeric" placeholder="25" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
             <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Seconds</label><input type="number" name="seconds" inputMode="numeric" min="0" max="59" placeholder="30" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
-            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Miles</label><input type="number" name="distance" inputMode="decimal" step="any" placeholder="2.5" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Miles</label><input type="number" name="distance" inputMode="decimal" step="any" placeholder="opt." className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
           </div>
           <div className="mb-5"><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Notes</label><input type="text" name="notes" placeholder="How'd it go?" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base text-on-surface focus:border-primary focus:outline-none" /></div>
-          <button type="submit" className="w-full bg-primary text-on-primary px-6 py-4 text-base font-bold">Save</button>
+          <button type="submit" disabled={!activityInput.trim()} className="w-full bg-primary text-on-primary px-6 py-4 text-base font-bold disabled:opacity-40">Save</button>
           {cardioStatus && <p className="text-center text-sm text-primary mt-3 font-mono">{cardioStatus}</p>}
         </form>
       </>
@@ -757,7 +802,7 @@ export default function FitnessTrackerPage() {
             )}
             <button onClick={() => setPageState('cardio')}
               className="flex-1 py-2 text-xs font-bold border border-outline text-on-surface-variant hover:bg-surface-container-high transition-colors">
-              Log Cardio
+              Log Activity
             </button>
           </div>
         </div>
