@@ -617,15 +617,15 @@ Registered with the Phase 1 tool registry:
 
 ## 18. Build Order
 
-1. **Turso migration** — move all Talaria tables from local SQLite to Turso. Test all existing modules.
-2. **Data model** — create fitness tables in Turso
-3. **Split template system** — CRUD for splits, rotation logic, auto-selection
-4. **Set entry UI (mobile-first)** — bubble grid with tap-confirm, long-press-edit, swipe-add/remove
-5. **Scoring engine** — MET calculations, modifier multipliers, daily score
-6. **Workout flow** — start → select gym → log exercises → finish → score display
+1. ✅ **Turso migration** — move all Talaria tables from local SQLite to Turso. Test all existing modules.
+2. ✅ **Data model** — create fitness tables in Turso (fitness_workouts, fitness_splits, fitness_exercises, fitness_sets, fitness_rotation_state)
+3. ✅ **Split template system** — splits with rotation logic, auto-selection, swap. Custom splits (Chest+Tri, Back+Bi, Legs).
+4. ✅ **Set entry UI (mobile-first)** — circular bubble grid with tap-confirm, hold+drag to adjust weight/reps (vertical=weight in 5s, horizontal=reps), double-tap for precise edit, add set button. Last-workout prefill.
+5. 🔶 **Scoring engine** — simple v1 placeholder (effort-based, not full MET). Demo data with progressive scores. Full MET engine deferred.
+6. ✅ **Workout flow** — start → log exercises → finish → save to Turso. Rotation advances on finish. Custom activity logging with autocomplete (Rock Climbing, Swimming, etc.).
 7. **Projection engine** — live score with projected finish, building-up/counting-down toggle
-8. **Heat map calendar** — GitHub-style with color grading
-9. **Score timeline + exercise progression charts** — line charts with time range toggles
+8. ✅ **Heat map calendar** — GitHub-style 365-day grid. Teal=weights, green=cardio, gray=rest. Demo data for visual.
+9. ✅ **Score timeline + exercise progression charts** — Recharts ComposedChart with daily scores + 7-day rolling average, 1M/3M/6M range toggles. Exercise progression deferred.
 10. **Gym profiles + calibration** — per-gym per-exercise weight adjustments
 11. **Rest timer** — between-set countdown, audio + haptic, auto-silence
 12. **Gamification** — streaks, levels, badges, PR detection
@@ -635,6 +635,9 @@ Registered with the Phase 1 tool registry:
 16. **MCP tools** — Cleetus integration for voice control
 17. **PWA setup** — service worker, manifest, add-to-home-screen prompt
 18. **Intelligent suggestions** — rule-based progression and recovery advice
+
+### Status as of April 2026
+Phases 1–4, 6, 8, 9 complete. Phase 5 partial (v1 placeholder scoring). Phases 7, 10–18 not started. Light theme styling attempted but blocked by global dark CSS variable cascade — needs a per-route layout override.
 
 ---
 

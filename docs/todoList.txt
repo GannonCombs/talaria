@@ -8,6 +8,7 @@ Add a way to turn proxy charging off (be careful)
 Allow different config (city, credit score, etc.)
 Scoring system. Wire up more datapoints.
 Find a better way to show Data in both panels (Top Matches and Personal Details going offscreen)
+Buy vs rent calculator
 Alerts/email? Maybe once I'm more seriously shopping.
 
 *Portfolio*
@@ -19,7 +20,15 @@ News alert? For trading something big quickly.
 Create view with Stitch
 
 *Fitness Tracker*
-Build out
+Scoring system
+Better cloud system to run from phone remotely
+Implement good UI
+Ghost mode/Social mode
+Mid-set weight change
+Add new exercises
+Add new lifts
+Navigation
+Log old workouts
 
 *Reading*
 Create view with Stitch
