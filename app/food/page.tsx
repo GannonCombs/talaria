@@ -73,19 +73,38 @@ const TIME_OPTIONS = [
   '7:30 PM', '8:00 PM', '8:30 PM', '9:00 PM', '9:30 PM', '10:00 PM',
 ];
 
-const DATE_OPTIONS = [
-  { label: 'Tonight', offset: 0 },
-  { label: 'Tomorrow', offset: 1 },
-  { label: 'This Weekend', offset: (() => { const d = new Date().getDay(); return d <= 6 ? 6 - d : 0; })() },
-];
+function today(): string {
+  return new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
+}
+
+function addDays(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString('en-CA');
+}
+
+function nextSaturday(): string {
+  const d = new Date();
+  const daysUntilSat = (6 - d.getDay() + 7) % 7 || 7;
+  d.setDate(d.getDate() + daysUntilSat);
+  return d.toLocaleDateString('en-CA');
+}
+
+function formatDateShort(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00'); // noon to avoid TZ shift
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function dateLabel(dateStr: string): string {
+  const t = today();
+  const tom = addDays(1);
+  const short = formatDateShort(dateStr);
+  if (dateStr === t) return `Tonight — ${short}`;
+  if (dateStr === tom) return `Tomorrow — ${short}`;
+  return short;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function dateFromOffset(offset: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().split('T')[0];
-}
 
 function formatTime(time24: string): string {
   const [h, m] = time24.split(':').map(Number);
@@ -166,11 +185,80 @@ const DEMO_FAVORITES: Favorite[] = [
   { favorite_id: 3, id: 3, resy_venue_id: 998, name: 'Ramen Tatsu-ya', cuisine: 'Japanese', price_range: 2, rating: 4.6, neighborhood: 'North Lamar', image_url: null },
 ];
 
+// ── Calendar picker ────────────────────────────────────────────────────────
+
+function DatePickerGrid({ selected, onSelect }: { selected: string; onSelect: (d: string) => void }) {
+  const [viewDate, setViewDate] = useState(() => {
+    const d = new Date(selected + 'T12:00:00');
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
+  const todayStr = today();
+  const { year, month } = viewDate;
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    cells.push(dateStr);
+  }
+
+  function prevMonth() {
+    setViewDate((v) => v.month === 0 ? { year: v.year - 1, month: 11 } : { year: v.year, month: v.month - 1 });
+  }
+  function nextMonth() {
+    setViewDate((v) => v.month === 11 ? { year: v.year + 1, month: 0 } : { year: v.year, month: v.month + 1 });
+  }
+
+  return (
+    <div className="border-t border-outline-variant p-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-2">
+        <button onClick={prevMonth} className="text-on-surface-variant hover:text-primary text-xs px-1">&larr;</button>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface">{monthLabel}</span>
+        <button onClick={nextMonth} className="text-on-surface-variant hover:text-primary text-xs px-1">&rarr;</button>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+          <div key={d} className="text-[9px] text-on-surface-variant font-bold py-1">{d}</div>
+        ))}
+        {cells.map((dateStr, i) => {
+          if (!dateStr) return <div key={`empty-${i}`} />;
+          const day = parseInt(dateStr.split('-')[2], 10);
+          const isPast = dateStr < todayStr;
+          const isSelected = dateStr === selected;
+          const isToday = dateStr === todayStr;
+          return (
+            <button
+              key={dateStr}
+              disabled={isPast}
+              onClick={() => onSelect(dateStr)}
+              className={`py-1 text-[11px] font-mono transition-colors duration-75 ${
+                isSelected
+                  ? 'bg-primary text-on-primary font-bold'
+                  : isToday
+                  ? 'text-primary font-bold hover:bg-primary/10'
+                  : isPast
+                  ? 'text-on-surface-variant/30 cursor-not-allowed'
+                  : 'text-on-surface hover:bg-surface-bright'
+              }`}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function FoodPage() {
   // Filters
-  const [dateOffset, setDateOffset] = useState(0);
+  const [date, setDate] = useState(today());
   const [partySize, setPartySize] = useState(2);
   const [selectedTime, setSelectedTime] = useState('7:00 PM');
   const [cuisine, setCuisine] = useState('Any');
@@ -196,8 +284,7 @@ export default function FoodPage() {
   const [booking, setBooking] = useState(false);
   const [bookedTokens, setBookedTokens] = useState<Set<string>>(new Set());
 
-  const date = dateFromOffset(dateOffset);
-  const dateLabel = DATE_OPTIONS.find((d) => d.offset === dateOffset)?.label ?? date;
+  const dateLabelText = dateLabel(date);
 
   // ── Data loading ─────────────────────────────────────────────────────
 
@@ -356,7 +443,7 @@ export default function FoodPage() {
     if (DEMO_MODE) {
       // Simulate booking without calling Resy
       await new Promise((r) => setTimeout(r, 800));
-      showToast(`Booked! ${restaurant.name}, ${dateLabel} ${formatTime(slot.startTime)}, ${partySize} people.`);
+      showToast(`Booked! ${restaurant.name}, ${dateLabelText} ${formatTime(slot.startTime)}, ${partySize} people.`);
       setBookedTokens((prev) => new Set(prev).add(slot.configToken));
       setReservations((prev) => [{
         resyToken: `demo-${Date.now()}`,
@@ -389,7 +476,7 @@ export default function FoodPage() {
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        showToast(`Booked! ${restaurant.name}, ${dateLabel} ${formatTime(slot.startTime)}, ${partySize} people.`);
+        showToast(`Booked! ${restaurant.name}, ${dateLabelText} ${formatTime(slot.startTime)}, ${partySize} people.`);
         setBookedTokens((prev) => new Set(prev).add(slot.configToken));
         setReservations((prev) => [{
           resyToken: data.resyToken,
@@ -479,7 +566,7 @@ export default function FoodPage() {
               </div>
               <div className="flex justify-between text-xs font-mono">
                 <span className="text-on-surface-variant">Date</span>
-                <span className="text-on-surface">{dateLabel}</span>
+                <span className="text-on-surface">{dateLabelText}</span>
               </div>
               <div className="flex justify-between text-xs font-mono">
                 <span className="text-on-surface-variant">Time</span>
@@ -540,19 +627,32 @@ export default function FoodPage() {
               className="flex items-center gap-2 border border-outline-variant bg-surface-container-low px-4 py-2 text-[11px] font-bold tracking-wider uppercase text-on-surface hover:bg-surface-bright transition-colors duration-75"
             >
               <Calendar size={14} />
-              {dateLabel}
+              {dateLabelText}
             </button>
             {openFilter === 'date' && (
-              <div className="absolute top-full left-0 mt-1 z-40 bg-surface-container-high border border-outline-variant min-w-[160px]">
-                {DATE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.label}
-                    onClick={() => { setDateOffset(opt.offset); setOpenFilter(null); }}
-                    className={`block w-full text-left px-4 py-2 text-xs hover:bg-surface-bright ${dateOffset === opt.offset ? 'text-primary font-bold' : 'text-on-surface'}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+              <div className="absolute top-full left-0 mt-1 z-40 bg-surface-container-high border border-outline-variant min-w-[220px]">
+                <button
+                  onClick={() => { setDate(today()); setOpenFilter(null); }}
+                  className={`block w-full text-left px-4 py-2 text-xs hover:bg-surface-bright ${date === today() ? 'text-primary font-bold' : 'text-on-surface'}`}
+                >
+                  Tonight — {formatDateShort(today())}
+                </button>
+                <button
+                  onClick={() => { setDate(addDays(1)); setOpenFilter(null); }}
+                  className={`block w-full text-left px-4 py-2 text-xs hover:bg-surface-bright ${date === addDays(1) ? 'text-primary font-bold' : 'text-on-surface'}`}
+                >
+                  Tomorrow — {formatDateShort(addDays(1))}
+                </button>
+                <button
+                  onClick={() => { setDate(nextSaturday()); setOpenFilter(null); }}
+                  className={`block w-full text-left px-4 py-2 text-xs hover:bg-surface-bright ${date === nextSaturday() ? 'text-primary font-bold' : 'text-on-surface'}`}
+                >
+                  This Weekend — {formatDateShort(nextSaturday())}
+                </button>
+                <DatePickerGrid
+                  selected={date}
+                  onSelect={(d) => { setDate(d); setOpenFilter(null); }}
+                />
               </div>
             )}
           </div>
