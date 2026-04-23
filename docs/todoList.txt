@@ -25,7 +25,6 @@ Better cloud system to run from phone remotely
 Implement good UI
 Ghost mode/Social mode
 Mid-set weight change
-Add new exercises
 Add new lifts
 Navigation
 Log old workouts

@@ -611,7 +611,8 @@ export default function FitnessTrackerPage() {
   const saveCardio = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); setCardioStatus('Saving...');
     try {
-      const activity = activityInput.trim() || (data.get('activity') as string) || 'run';
+      const rawActivity = activityInput.trim() || (data.get('activity') as string) || 'Run';
+      const activity = rawActivity.replace(/\b\w/g, (c) => c.toUpperCase());
       const res = await fetch('/api/fitness/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activity, duration_minutes: (data.get('duration') || data.get('seconds')) ? (parseFloat(data.get('duration') as string || '0') + parseFloat(data.get('seconds') as string || '0') / 60) : null, distance_miles: data.get('distance') ? parseFloat(data.get('distance') as string) : null, notes: data.get('notes') || null }) });
       if (res.ok) {
         const saved = await res.json();
@@ -699,8 +700,12 @@ export default function FitnessTrackerPage() {
   // LOG ACTIVITY FORM
   // ══════════════════════════════════════════════════════════════════
   if (pageState === 'cardio') {
-    // Merge known activities with defaults, deduplicate
-    const allSuggestions = [...new Set([...knownActivities, ...DEFAULT_ACTIVITIES])];
+    // Merge known activities with defaults, case-insensitive deduplicate
+    const seen = new Map<string, string>();
+    for (const a of [...DEFAULT_ACTIVITIES, ...knownActivities]) {
+      if (!seen.has(a.toLowerCase())) seen.set(a.toLowerCase(), a);
+    }
+    const allSuggestions = [...seen.values()];
     const filtered = activityInput.length > 0
       ? allSuggestions.filter((a) => a.toLowerCase().includes(activityInput.toLowerCase()))
       : allSuggestions;
