@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'activity is required' }, { status: 400 });
   }
 
-  const date = new Date().toISOString().split('T')[0];
+  const date = body.date ?? new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
   const type = CARDIO_ACTIVITIES.has(activity.toLowerCase()) ? 'cardio' : 'activity';
 
   const result = await dbRun(
