@@ -17,7 +17,7 @@ CSVs - Fid (better), Binance (better), Kraken, OKX?
 News alert? For trading something big quickly.
 
 *Food*
-Create view with Stitch
+Token Management
 
 *Fitness Tracker*
 Scoring system

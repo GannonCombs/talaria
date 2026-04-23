@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sovereign Terminal - Food</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#10141a",
+                        "on-surface": "#dfe2eb",
+                        "surface-tint": "#28dfb5",
+                        "on-tertiary": "#452b00",
+                        "on-primary-fixed": "#002118",
+                        "on-primary": "#00382b",
+                        "primary-fixed": "#55fcd0",
+                        "surface-container-lowest": "#0a0e14",
+                        "surface-container": "#1c2026",
+                        "error": "#ffb4ab",
+                        "surface": "#10141a",
+                        "on-tertiary-container": "#694300",
+                        "surface-bright": "#353940",
+                        "surface-variant": "#31353c",
+                        "on-secondary-container": "#00320a",
+                        "secondary-fixed-dim": "#67df70",
+                        "inverse-surface": "#dfe2eb",
+                        "on-primary-fixed-variant": "#00513f",
+                        "secondary-container": "#27a640",
+                        "on-tertiary-fixed": "#291800",
+                        "background": "#10141a",
+                        "surface-container-low": "#181c22",
+                        "outline": "#85948d",
+                        "surface-container-highest": "#31353c",
+                        "secondary-fixed": "#83fc89",
+                        "tertiary-container": "#fbab29",
+                        "primary": "#46f1c5",
+                        "on-error-container": "#ffdad6",
+                        "inverse-primary": "#006b55",
+                        "error-container": "#93000a",
+                        "on-error": "#690005",
+                        "on-tertiary-fixed-variant": "#633f00",
+                        "on-background": "#dfe2eb",
+                        "secondary": "#67df70",
+                        "on-secondary": "#00390d",
+                        "tertiary": "#ffcf91",
+                        "tertiary-fixed-dim": "#ffb955",
+                        "on-secondary-fixed-variant": "#005317",
+                        "on-primary-container": "#005643",
+                        "primary-fixed-dim": "#28dfb5",
+                        "tertiary-fixed": "#ffddb4",
+                        "inverse-on-surface": "#2d3137",
+                        "primary-container": "#00d4aa",
+                        "on-surface-variant": "#bacac2",
+                        "on-secondary-fixed": "#002105",
+                        "outline-variant": "#3b4a44",
+                        "surface-container-high": "#262a31"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "0px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #0D1117; color: #dfe2eb; }
+        h1, h2, h3, h4, h5, h6 { font-family: 'Space Grotesk', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Thin scrollbar for terminal feel */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #10141a; }
+        ::-webkit-scrollbar-thumb { background: #30363D; }
+        ::-webkit-scrollbar-thumb:hover { background: #46f1c5; }
+    </style>
+</head>
+<body class="bg-[#0D1117] text-on-surface min-h-screen flex flex-col m-0 p-0 overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-[#10141a] flex justify-between items-center w-full px-4 h-14 docked full-width top-0 rounded-none border-b border-[#30363D] border-b-[1px] flat no shadows z-50 relative shrink-0">
+<div class="flex items-center gap-4">
+<div class="text-xl font-bold tracking-tighter text-[#46f1c5] uppercase font-['Space_Grotesk'] tracking-tight">Sovereign Terminal</div>
+<div class="w-2 h-2 bg-tertiary-container rounded-none"></div>
+</div>
+<div class="flex items-center gap-4">
+<!-- Cost Pill -->
+<div class="flex items-center gap-2 border border-outline-variant bg-surface-container-lowest px-3 py-1 h-8">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant">monitoring</span>
+<span class="font-mono text-[10px] uppercase text-on-surface-variant tracking-wider">Today</span>
+<span class="font-mono text-[12px] text-secondary">$0.07</span>
+</div>
+<!-- Wallet Pill -->
+<div class="flex items-center gap-2 border border-outline-variant bg-surface-container-lowest px-3 py-1 h-8">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant">account_balance_wallet</span>
+<span class="font-mono text-[10px] uppercase text-on-surface-variant tracking-wider">Wallet</span>
+<span class="font-mono text-[12px] text-primary">$12.43</span>
+</div>
+<div class="flex gap-2">
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant bg-transparent text-slate-500 hover:bg-[#181c22] transition-colors duration-75">
+<span class="material-symbols-outlined text-[18px]">account_balance_wallet</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant bg-transparent text-slate-500 hover:bg-[#181c22] transition-colors duration-75">
+<span class="material-symbols-outlined text-[18px]">account_balance</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant bg-transparent text-slate-500 hover:bg-[#181c22] transition-colors duration-75 relative">
+<span class="material-symbols-outlined text-[18px]">notifications</span>
+<span class="absolute top-1 right-1 w-1.5 h-1.5 bg-primary rounded-none"></span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 h-[calc(100vh-3.5rem)] overflow-hidden">
+<!-- SideNavBar -->
+<nav class="bg-[#10141a] docked left-0 h-full w-64 rounded-none border-r border-[#30363D] border-r-[1px] flat no shadows fixed left-0 top-14 h-[calc(100vh-3.5rem)] flex flex-col py-6 shrink-0 z-40">
+<div class="px-6 mb-8">
+<div class="text-[10px] font-['JetBrains_Mono'] uppercase tracking-widest text-on-surface-variant mb-1">ANALYST_01</div>
+<div class="text-xs text-primary font-mono">Verified Node</div>
+</div>
+<div class="flex flex-col space-y-1">
+<!-- Intent mapping: Food is an exploration/discovery activity, doesn't directly map to Cost Analytics or Wallet, but might be an external action. We will highlight nothing as exact match, or highlight Cost Analytics if it's considered an expense. Let's keep them all inactive as none match 'Food'. Actually, following "Semantic Mapping (CRITICAL)", no direct match. So none are highlighted. -->
+<a class="text-slate-500 hover:text-slate-200 px-6 py-4 flex items-center gap-3 hover:bg-[#181c22] transition-all duration-75 font-['JetBrains_Mono'] uppercase text-[10px] tracking-widest" href="#">
+<span class="material-symbols-outlined text-[16px]">analytics</span>
+                    Cost Analytics
+                </a>
+<a class="text-slate-500 hover:text-slate-200 px-6 py-4 flex items-center gap-3 hover:bg-[#181c22] transition-all duration-75 font-['JetBrains_Mono'] uppercase text-[10px] tracking-widest" href="#">
+<span class="material-symbols-outlined text-[16px]">account_balance_wallet</span>
+                    Wallet
+                </a>
+<a class="text-slate-500 hover:text-slate-200 px-6 py-4 flex items-center gap-3 hover:bg-[#181c22] transition-all duration-75 font-['JetBrains_Mono'] uppercase text-[10px] tracking-widest" href="#">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+                    Settings
+                </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-64 flex flex-col h-full bg-[#0D1117] overflow-hidden relative">
+<!-- Page Header -->
+<div class="shrink-0 border-b border-outline-variant bg-[#10141a] p-6">
+<div class="flex items-center gap-4 mb-6">
+<button class="w-8 h-8 flex items-center justify-center border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-bright transition-colors duration-0">
+<span class="material-symbols-outlined text-[18px]">arrow_back</span>
+</button>
+<h1 class="text-xl font-bold tracking-tight text-on-surface uppercase">Food</h1>
+</div>
+<!-- Filter Bar -->
+<div class="flex flex-wrap gap-3">
+<button class="flex items-center gap-2 border border-outline-variant bg-[#161B22] px-4 py-2 hover:bg-surface-bright transition-colors duration-0 text-[11px] font-bold tracking-wider uppercase text-on-surface">
+<span class="material-symbols-outlined text-[14px]">calendar_today</span>
+                        Tonight
+                    </button>
+<button class="flex items-center gap-2 border border-outline-variant bg-[#161B22] px-4 py-2 hover:bg-surface-bright transition-colors duration-0 text-[11px] font-bold tracking-wider uppercase text-on-surface">
+<span class="material-symbols-outlined text-[14px]">group</span>
+                        2 people
+                    </button>
+<button class="flex items-center gap-2 border border-outline-variant bg-[#161B22] px-4 py-2 hover:bg-surface-bright transition-colors duration-0 text-[11px] font-bold tracking-wider uppercase text-on-surface">
+<span class="material-symbols-outlined text-[14px]">schedule</span>
+                        7:00 PM
+                    </button>
+<button class="flex items-center gap-2 border border-outline-variant bg-[#161B22] px-4 py-2 hover:bg-surface-bright transition-colors duration-0 text-[11px] font-bold tracking-wider uppercase text-on-surface">
+<span class="material-symbols-outlined text-[14px]">restaurant</span>
+                        Any cuisine
+                    </button>
+<button class="flex items-center gap-2 border border-outline-variant bg-[#161B22] px-4 py-2 hover:bg-surface-bright transition-colors duration-0 text-[11px] font-bold tracking-wider uppercase text-on-surface">
+<span class="material-symbols-outlined text-[14px]">payments</span>
+                        Any price
+                    </button>
+</div>
+</div>
+<!-- Two Column Layout -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Left Panel (Results) -->
+<div class="w-2/3 border-r border-outline-variant overflow-y-auto bg-[#0a0e14] p-6 space-y-4">
+<!-- Card 1 -->
+<div class="border border-outline-variant bg-[#1c2026] p-4 flex gap-6 relative group">
+<div class="absolute top-0 left-0 w-1 h-full bg-transparent group-hover:bg-primary transition-colors duration-0"></div>
+<img alt="Sushi rolls on a dark slate plate" class="w-32 h-32 object-cover border border-outline-variant shrink-0" data-alt="High-end sushi rolls meticulously arranged on a dark slate plate with dramatic spot lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAtVzKIwlEwF5rGvxVI-XoVvC1lFz-OE-PbbBLtwf-rcPdn1Fbw33UnreWx08PTO-Nk96WN8vmPdtqr7aBan_C8jk35cI6qJhoODeznv4jPPhdWkKygbkyCJBVGIiVgiVIXC77xP3lbkJ-4uQXM3rG6ZbEH0_L4dBAe3LmrJL3SrF9lVad4159bY4zbM8J9KNV5HJPUd62okrAC03WTHnGxauP8RHSf1JCzSdXFqU3DFBZ2H-JDMebmxM0nWX2rl_y0tUuoc5W0bbc"/>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-2">
+<h2 class="text-lg font-bold text-on-surface uppercase tracking-tight">Uchi</h2>
+<div class="flex items-center gap-1 bg-surface-container-highest px-2 py-1 border border-outline-variant">
+<span class="material-symbols-outlined text-[14px] text-tertiary-container" data-weight="fill">star</span>
+<span class="font-mono text-sm text-on-surface">4.8</span>
+</div>
+</div>
+<div class="flex gap-4 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-4">
+<span>Japanese</span>
+<span class="text-on-surface">$$$$</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">6:45</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">7:15</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">7:30</button>
+<button class="border border-outline-variant bg-transparent text-on-surface-variant px-3 py-1 font-mono text-xs hover:bg-surface-bright transition-colors duration-0">8:00</button>
+<button class="border border-outline-variant bg-transparent text-on-surface-variant px-3 py-1 font-mono text-xs hover:bg-surface-bright transition-colors duration-0">9:15</button>
+</div>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="border border-outline-variant bg-[#1c2026] p-4 flex gap-6 relative group">
+<div class="absolute top-0 left-0 w-1 h-full bg-transparent group-hover:bg-primary transition-colors duration-0"></div>
+<img alt="Artisanal plated modern american cuisine" class="w-32 h-32 object-cover border border-outline-variant shrink-0" data-alt="Artisanal modern american dish with roasted vegetables and reduction sauce on speckled ceramic plate" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQCIgOFQ2VJSmeao340Wi7LuJNCrAUSFvLswjl4JWjYo24mq4Hi999Z6nbzQxfCXVGmJP8YuqnVh9XWpc-9zvPHzgF-7v3fE7PYRjqWdrEY7cscw2J9wyrM_4LJ7RZ--gxBanrjk0sYQVnTTjIy4UNE02NY1rriv02TXvZHZXaWFvwq1d_Ypxg-Rz1AeY7guu1-M7JQgfNUaUIRIEpcbsM39EqRGPcCGhJLu-2gEaJ3BpuHTfJu7x0Swcq6Iwh6rSLAhap8G3Bxm8"/>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-2">
+<h2 class="text-lg font-bold text-on-surface uppercase tracking-tight">Emmer &amp; Rye</h2>
+<div class="flex items-center gap-1 bg-surface-container-highest px-2 py-1 border border-outline-variant">
+<span class="material-symbols-outlined text-[14px] text-tertiary-container" data-weight="fill">star</span>
+<span class="font-mono text-sm text-on-surface">4.7</span>
+</div>
+</div>
+<div class="flex gap-4 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-4">
+<span>New American</span>
+<span class="text-on-surface">$$$</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">6:45</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">7:15</button>
+<button class="border border-outline-variant bg-transparent text-on-surface-variant px-3 py-1 font-mono text-xs hover:bg-surface-bright transition-colors duration-0">7:30</button>
+<button class="border border-outline-variant bg-transparent text-on-surface-variant px-3 py-1 font-mono text-xs hover:bg-surface-bright transition-colors duration-0">8:00</button>
+<button class="border border-outline-variant bg-transparent text-on-surface-variant px-3 py-1 font-mono text-xs hover:bg-surface-bright transition-colors duration-0">9:15</button>
+</div>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="border border-outline-variant bg-[#1c2026] p-4 flex gap-6 relative group">
+<div class="absolute top-0 left-0 w-1 h-full bg-transparent group-hover:bg-primary transition-colors duration-0"></div>
+<img alt="Steaming bowl of ramen" class="w-32 h-32 object-cover border border-outline-variant shrink-0" data-alt="Steaming bowl of rich tonkotsu ramen with pork belly, soft boiled egg, and scallions in dark bowl" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBeKWZ5ZEZwIJtn8nBoqG8Z_GFtf-AsH16Y_3ZeapCs2s0_gEqytnItWQLvR4b-Tuby78Gc_EIC6cgy4UmwGZwD8TSs4_zEt9Yjm0s8MWCquag3NMCocp4KNZHGNYOmXYYaGkMfguHXSfIAaSXnneRthDVcI9pmJJUNgIP59Ys_CZqoiVuITqsjARTxm7szUW0ATinn12Y_KXl5N6_GrpXXhFp5iVnPSlkljQDPNn7cCm898Ars1J7590NVnIQbmmbAw-aFXfOMGlw"/>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-2">
+<h2 class="text-lg font-bold text-on-surface uppercase tracking-tight">Ramen Tatsu-ya</h2>
+<div class="flex items-center gap-1 bg-surface-container-highest px-2 py-1 border border-outline-variant">
+<span class="material-symbols-outlined text-[14px] text-tertiary-container" data-weight="fill">star</span>
+<span class="font-mono text-sm text-on-surface">4.6</span>
+</div>
+</div>
+<div class="flex gap-4 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-4">
+<span>Japanese</span>
+<span class="text-on-surface">$$</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">6:45</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">7:15</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">7:30</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">8:00</button>
+<button class="border border-[#00D4AA] bg-[#00D4AA]/10 text-[#00D4AA] px-3 py-1 font-mono text-xs hover:bg-[#00D4AA] hover:text-[#002118] transition-colors duration-0">9:15</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Panel (Sidebar Content) -->
+<div class="w-1/3 bg-[#10141a] overflow-y-auto p-6 space-y-8">
+<!-- Upcoming -->
+<div>
+<div class="flex items-center gap-2 mb-4 border-b border-outline-variant pb-2">
+<span class="material-symbols-outlined text-[16px] text-[#00D4AA]">event</span>
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface">Upcoming</h3>
+</div>
+<div class="border border-primary bg-primary/5 p-4 relative">
+<div class="absolute top-0 left-0 w-1 h-full bg-primary"></div>
+<div class="flex justify-between items-start mb-2">
+<h4 class="font-bold text-on-surface uppercase">Uchi</h4>
+<span class="bg-surface-container-highest px-2 py-1 text-[10px] font-mono text-primary uppercase border border-outline-variant">Confirmed</span>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between text-xs font-mono text-on-surface-variant">
+<span>Date</span>
+<span class="text-on-surface">Sat Apr 19</span>
+</div>
+<div class="flex justify-between text-xs font-mono text-on-surface-variant">
+<span>Time</span>
+<span class="text-on-surface">7:15 PM</span>
+</div>
+<div class="flex justify-between text-xs font-mono text-on-surface-variant">
+<span>Party</span>
+<span class="text-on-surface">2 people</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Favorites -->
+<div>
+<div class="flex items-center gap-2 mb-4 border-b border-outline-variant pb-2">
+<span class="material-symbols-outlined text-[16px] text-tertiary-container">favorite</span>
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface">Favorites</h3>
+</div>
+<ul class="space-y-2">
+<li class="flex items-center justify-between p-3 border border-outline-variant bg-surface-container hover:bg-surface-bright transition-colors duration-0 cursor-pointer">
+<span class="font-bold text-sm uppercase">Uchi</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
+</li>
+<li class="flex items-center justify-between p-3 border border-outline-variant bg-surface-container hover:bg-surface-bright transition-colors duration-0 cursor-pointer">
+<span class="font-bold text-sm uppercase">Emmer &amp; Rye</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
+</li>
+<li class="flex items-center justify-between p-3 border border-outline-variant bg-surface-container hover:bg-surface-bright transition-colors duration-0 cursor-pointer">
+<span class="font-bold text-sm uppercase">Ramen Tatsu-ya</span>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_forward</span>
+</li>
+</ul>
+</div>
+<!-- Past -->
+<div>
+<button class="w-full flex items-center justify-between border-b border-outline-variant pb-2 hover:text-primary transition-colors duration-0">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">history</span>
+<h3 class="text-sm font-bold uppercase tracking-wider text-on-surface-variant">Past</h3>
+</div>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">expand_more</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

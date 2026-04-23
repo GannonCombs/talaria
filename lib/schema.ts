@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -116,6 +116,53 @@ export const CREATE_TABLES_SQL = `
     pages INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS food_restaurants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resy_venue_id INTEGER NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    cuisine TEXT,
+    price_range INTEGER,
+    rating REAL,
+    neighborhood TEXT,
+    address TEXT,
+    latitude REAL,
+    longitude REAL,
+    image_url TEXT,
+    description TEXT,
+    resy_url TEXT,
+    is_active INTEGER DEFAULT 1,
+    last_cached_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_food_restaurants_cuisine ON food_restaurants(cuisine);
+  CREATE INDEX IF NOT EXISTS idx_food_restaurants_active ON food_restaurants(is_active);
+
+  CREATE TABLE IF NOT EXISTS food_favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    restaurant_id INTEGER NOT NULL REFERENCES food_restaurants(id),
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    sort_order INTEGER DEFAULT 0,
+    UNIQUE(restaurant_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS food_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resy_reservation_id TEXT,
+    restaurant_id INTEGER REFERENCES food_restaurants(id),
+    restaurant_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    party_size INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'confirmed',
+    booked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    cancelled_at TEXT,
+    config_token TEXT,
+    seating_type TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_food_reservations_status ON food_reservations(status);
+  CREATE INDEX IF NOT EXISTS idx_food_reservations_date ON food_reservations(date);
 `;
 
 export const DEFAULT_PREFERENCES: Record<string, string> = {

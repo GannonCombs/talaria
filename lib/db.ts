@@ -245,7 +245,7 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
       await client.execute('ALTER TABLE fitness_workouts ADD COLUMN finished_at TEXT');
     }
 
-    // Seed default splits
+    // Seed default splits (fitness)
     const checkSplits = await client.execute('SELECT COUNT(*) as n FROM fitness_splits');
     if (Number(checkSplits.rows[0].n) === 0) {
       await client.batch([
@@ -288,6 +288,54 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
         },
       ], 'write');
     }
+  }
+  if (fromVersion < 13) {
+    await client.executeMultiple(`
+      CREATE TABLE IF NOT EXISTS food_restaurants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resy_venue_id INTEGER NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        cuisine TEXT,
+        price_range INTEGER,
+        rating REAL,
+        neighborhood TEXT,
+        address TEXT,
+        latitude REAL,
+        longitude REAL,
+        image_url TEXT,
+        description TEXT,
+        resy_url TEXT,
+        is_active INTEGER DEFAULT 1,
+        last_cached_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_food_restaurants_cuisine ON food_restaurants(cuisine);
+      CREATE INDEX IF NOT EXISTS idx_food_restaurants_active ON food_restaurants(is_active);
+
+      CREATE TABLE IF NOT EXISTS food_favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restaurant_id INTEGER NOT NULL REFERENCES food_restaurants(id),
+        added_at TEXT NOT NULL DEFAULT (datetime('now')),
+        sort_order INTEGER DEFAULT 0,
+        UNIQUE(restaurant_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS food_reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resy_reservation_id TEXT,
+        restaurant_id INTEGER REFERENCES food_restaurants(id),
+        restaurant_name TEXT NOT NULL,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
+        party_size INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'confirmed',
+        booked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        cancelled_at TEXT,
+        config_token TEXT,
+        seating_type TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_food_reservations_status ON food_reservations(status);
+      CREATE INDEX IF NOT EXISTS idx_food_reservations_date ON food_reservations(date);
+    `);
   }
 }
 
