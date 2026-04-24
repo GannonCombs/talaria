@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Talaria - Reading Main View</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-tertiary": "#452b00",
+                "secondary-container": "#27a640",
+                "on-error-container": "#ffdad6",
+                "on-secondary-container": "#00320a",
+                "on-surface": "#dfe2eb",
+                "tertiary-fixed-dim": "#ffb955",
+                "error-container": "#93000a",
+                "on-primary-fixed": "#002118",
+                "surface": "#10141a",
+                "surface-bright": "#353940",
+                "on-primary": "#00382b",
+                "on-primary-container": "#005643",
+                "on-secondary": "#00390d",
+                "surface-container": "#1c2026",
+                "on-secondary-fixed": "#002105",
+                "surface-tint": "#28dfb5",
+                "inverse-on-surface": "#2d3137",
+                "surface-container-lowest": "#0a0e14",
+                "secondary-fixed-dim": "#67df70",
+                "on-tertiary-fixed": "#291800",
+                "on-tertiary-container": "#694300",
+                "surface-container-high": "#262a31",
+                "on-surface-variant": "#bacac2",
+                "tertiary": "#ffcf91",
+                "tertiary-container": "#fbab29",
+                "surface-dim": "#10141a",
+                "on-tertiary-fixed-variant": "#633f00",
+                "surface-container-low": "#181c22",
+                "primary-container": "#00d4aa",
+                "on-background": "#dfe2eb",
+                "outline": "#85948d",
+                "surface-variant": "#31353c",
+                "secondary": "#67df70",
+                "background": "#10141a",
+                "inverse-surface": "#dfe2eb",
+                "primary-fixed": "#55fcd0",
+                "surface-container-highest": "#31353c",
+                "on-secondary-fixed-variant": "#005317",
+                "on-error": "#690005",
+                "primary-fixed-dim": "#28dfb5",
+                "primary": "#46f1c5",
+                "outline-variant": "#3b4a44",
+                "on-primary-fixed-variant": "#00513f",
+                "inverse-primary": "#006b55",
+                "secondary-fixed": "#83fc89",
+                "tertiary-fixed": "#ffddb4",
+                "error": "#ffb4ab"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+        },
+        "spacing": {},
+        "fontFamily": {
+                "headline": [
+                        "Space Grotesk"
+                ],
+                "display": [
+                        "Space Grotesk"
+                ],
+                "body": [
+                        "Inter"
+                ],
+                "label": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {}
+},
+    },
+  }
+</script>
+<style>
+  body { font-family: 'Inter', sans-serif; background-color: #10141a; color: #dfe2eb; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+  .border-sharp { border-radius: 0px; }
+</style>
+</head>
+<body class="bg-surface text-on-surface h-screen flex flex-col overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-[#10141a] docked full-width top-0 border-b border-b border-[#30363D] flat no shadows flex justify-between items-center w-full px-6 h-12 z-50 flex-shrink-0">
+<div class="flex items-center space-x-4">
+<span class="text-sm font-bold tracking-widest text-[#46f1c5] uppercase">TALARIA</span>
+</div>
+<div class="flex items-center space-x-4">
+<div class="hidden md:flex space-x-2">
+<span class="text-slate-500 font-mono text-xs hover:bg-[#262a31] transition-colors duration-50 px-2 py-1 cursor-pointer">Explore</span>
+<span class="text-[#46f1c5] font-mono text-xs bg-[#262a31] px-2 py-1 cursor-pointer">Reading</span>
+</div>
+</div>
+<div class="flex items-center space-x-4">
+<div class="flex items-center space-x-3 text-xs font-mono">
+<div class="text-[#46f1c5] border border-outline-variant px-2 py-0.5 border-sharp bg-surface-container-lowest">$12.43</div>
+<div class="text-slate-500 border border-outline-variant px-2 py-0.5 border-sharp bg-surface-container-lowest">$0.07 today</div>
+</div>
+<button class="text-slate-500 hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-lg" data-icon="settings">settings</span>
+</button>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<nav class="bg-[#10141a] docked left-0 h-full w-16 border-r border-r border-[#30363D] flat no shadows flex flex-col items-center py-4 border-r border-[#30363D] h-screen hidden md:flex flex-shrink-0 z-40">
+<div class="flex flex-col space-y-6 w-full">
+<button class="text-slate-600 hover:text-[#46f1c5] hover:bg-[#181c22] w-full py-3 flex justify-center group relative instant state switching 0ms" title="Cost Analytics">
+<span class="material-symbols-outlined" data-icon="query_stats" style="stroke-width: 1.25px;">query_stats</span>
+</button>
+<button class="text-slate-600 hover:text-[#46f1c5] hover:bg-[#181c22] w-full py-3 flex justify-center group relative instant state switching 0ms" title="Wallet">
+<span class="material-symbols-outlined" data-icon="account_balance_wallet" style="stroke-width: 1.25px;">account_balance_wallet</span>
+</button>
+<button class="text-slate-600 hover:text-[#46f1c5] hover:bg-[#181c22] w-full py-3 flex justify-center group relative instant state switching 0ms" title="Settings">
+<span class="material-symbols-outlined" data-icon="settings_input_component" style="stroke-width: 1.25px;">settings_input_component</span>
+</button>
+</div>
+<div class="mt-auto mb-16">
+<div class="w-8 h-8 bg-surface-container border border-outline-variant flex items-center justify-center border-sharp cursor-pointer group">
+<span class="text-[8px] font-bold text-primary group-hover:animate-pulse">SYS</span>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 overflow-y-auto p-8 lg:p-12">
+<div class="max-w-5xl mx-auto space-y-8">
+<!-- Page Header -->
+<div class="flex items-center space-x-4 mb-8">
+<button class="text-slate-500 hover:text-primary transition-colors border border-outline-variant p-1 border-sharp bg-surface-container">
+<span class="material-symbols-outlined" data-icon="arrow_back">arrow_back</span>
+</button>
+<h1 class="text-xl font-bold tracking-tight">Reading</h1>
+</div>
+<!-- Top Section -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6 border-sharp">
+<!-- Left: Today's Entry -->
+<div class="md:col-span-8 bg-surface-container-low border border-outline-variant p-8 flex flex-col justify-between border-sharp relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4">
+<span class="material-symbols-outlined text-outline-variant text-4xl opacity-20 group-hover:opacity-40 transition-opacity" data-icon="edit_document">edit_document</span>
+</div>
+<div>
+<h2 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500 mb-2">Today</h2>
+<div class="flex items-baseline space-x-2">
+<span class="font-mono text-6xl font-bold text-primary">34</span>
+<span class="text-sm text-slate-400">pages</span>
+</div>
+</div>
+<div class="flex items-center justify-between mt-8">
+<div class="flex space-x-2">
+<button class="w-10 h-10 border border-outline-variant flex items-center justify-center text-primary hover:bg-surface-bright transition-colors border-sharp bg-surface-container">
+<span class="material-symbols-outlined" data-icon="remove">remove</span>
+</button>
+<button class="w-10 h-10 border border-primary flex items-center justify-center text-on-primary bg-primary hover:bg-surface-bright hover:text-primary transition-colors border-sharp">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+</div>
+<div class="text-xs font-mono text-slate-500">
+                Yesterday: 28 pages
+              </div>
+</div>
+</div>
+<!-- Right: Book Hero -->
+<div class="md:col-span-4 bg-surface-container-low border border-outline-variant p-8 flex items-center justify-center border-sharp min-h-[240px]">
+<div class="w-48 h-48 border border-primary border-sharp relative flex items-center justify-center bg-surface-container-lowest p-4">
+<!-- Abstract Book Graphic representation -->
+<div class="w-full h-full border border-outline-variant relative">
+<div class="absolute left-1/2 top-0 bottom-0 w-px bg-outline-variant"></div>
+<div class="absolute inset-4 border border-outline-variant/50"></div>
+<div class="absolute inset-8 border border-outline-variant/30"></div>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-6xl opacity-80" data-icon="menu_book">menu_book</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Stats Row -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="bg-surface-container border border-outline-variant p-5 border-sharp">
+<h3 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500 mb-3">STREAK</h3>
+<div class="flex items-baseline space-x-2">
+<span class="font-mono text-2xl text-secondary">14</span>
+<span class="text-xs text-slate-400">days</span>
+<span class="text-lg">🔥</span>
+</div>
+</div>
+<div class="bg-surface-container border border-outline-variant p-5 border-sharp">
+<h3 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500 mb-3">THIS WEEK</h3>
+<div class="flex items-baseline space-x-2">
+<span class="font-mono text-2xl text-on-surface">187</span>
+<span class="text-xs text-slate-400">pages</span>
+</div>
+</div>
+<div class="bg-surface-container border border-outline-variant p-5 border-sharp">
+<h3 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500 mb-3">THIS MONTH</h3>
+<div class="flex items-baseline space-x-2">
+<span class="font-mono text-2xl text-on-surface">412</span>
+<span class="text-xs text-slate-400">pages</span>
+</div>
+</div>
+</div>
+<!-- Heatmap Calendar Placeholder -->
+<div class="bg-surface-container border border-outline-variant p-6 border-sharp">
+<div class="flex justify-between items-end mb-4">
+<h3 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500">ACTIVITY MAP</h3>
+<span class="text-xs font-mono text-slate-500">LAST 365 DAYS</span>
+</div>
+<div class="w-full bg-surface-container-lowest border border-outline-variant p-4 h-32 flex flex-col border-sharp relative">
+<!-- Simulated Heatmap Grid -->
+<div class="grid grid-cols-[repeat(52,minmax(0,1fr))] gap-1 h-full w-full opacity-60">
+<!-- Just a visual representation using simple divs -->
+<div class="bg-outline-variant/20 rounded-none"></div><div class="bg-outline-variant/20 rounded-none"></div><div class="bg-primary/40 rounded-none"></div><div class="bg-outline-variant/20 rounded-none"></div><div class="bg-primary rounded-none"></div>
+<!-- This would typically be populated dynamically, rendering a static pattern for design purpose -->
+<div class="col-span-47 flex items-center justify-center absolute inset-0">
+<p class="font-mono text-xs text-outline-variant">[HEATMAP RENDER CANVAS]</p>
+</div>
+</div>
+<div class="flex justify-end items-center mt-2 space-x-2 text-[10px] text-slate-500 font-mono">
+<span>Less</span>
+<div class="flex space-x-1">
+<div class="w-3 h-3 bg-surface-bright border-sharp"></div>
+<div class="w-3 h-3 bg-primary/30 border-sharp"></div>
+<div class="w-3 h-3 bg-primary/60 border-sharp"></div>
+<div class="w-3 h-3 bg-primary border-sharp"></div>
+</div>
+<span>More</span>
+</div>
+</div>
+</div>
+<!-- Pages Per Day Chart Placeholder -->
+<div class="bg-surface-container border border-outline-variant p-6 border-sharp">
+<div class="flex justify-between items-end mb-4">
+<h3 class="text-[0.6875rem] font-bold uppercase tracking-widest text-slate-500">PAGES PER DAY</h3>
+<div class="flex space-x-4 text-[10px] font-mono">
+<span class="flex items-center text-slate-400"><span class="w-2 h-2 bg-primary/40 mr-1 border-sharp"></span> Daily</span>
+<span class="flex items-center text-primary"><span class="w-2 h-2 bg-primary mr-1 border-sharp"></span> 7D Avg</span>
+</div>
+</div>
+<div class="w-full bg-surface-container-lowest border border-outline-variant p-4 h-64 border-sharp relative flex">
+<!-- Y Axis -->
+<div class="flex flex-col justify-between h-full pr-4 text-xs font-mono text-slate-600 border-r border-outline-variant">
+<span>100</span>
+<span>75</span>
+<span>50</span>
+<span>25</span>
+<span>0</span>
+</div>
+<!-- Graph Area -->
+<div class="flex-1 relative h-full w-full px-2">
+<!-- Grid Lines -->
+<div class="absolute inset-0 flex flex-col justify-between pointer-events-none px-2 py-1">
+<div class="w-full h-px bg-outline-variant/30"></div>
+<div class="w-full h-px bg-outline-variant/30"></div>
+<div class="w-full h-px bg-outline-variant/30"></div>
+<div class="w-full h-px bg-outline-variant/30"></div>
+<div class="w-full h-px bg-outline-variant/30"></div>
+</div>
+<!-- Simulated Chart Lines -->
+<div class="absolute inset-0 flex items-center justify-center">
+<p class="font-mono text-xs text-outline-variant">[TIME SERIES CHART RENDER CANVAS]</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>
