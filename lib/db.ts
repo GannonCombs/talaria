@@ -337,6 +337,12 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
       CREATE INDEX IF NOT EXISTS idx_food_reservations_date ON food_reservations(date);
     `);
   }
+
+  if (fromVersion < 14) {
+    if (!(await hasColumn(client, 'fitness_workouts', 'reps'))) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN reps INTEGER');
+    }
+  }
 }
 
 // ── Fresh DB build ─────────────────────────────────────────────────────────

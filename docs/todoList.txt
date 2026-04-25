@@ -27,4 +27,3 @@ Ghost mode/Social mode
 Mid-set weight change
 Add new lifts
 Navigation
-Log old workouts

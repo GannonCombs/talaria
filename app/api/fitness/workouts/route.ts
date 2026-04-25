@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { activity, duration_minutes, distance_miles, notes } = body;
+  const { activity, duration_minutes, distance_miles, reps, notes } = body;
 
   if (!activity) {
     return NextResponse.json({ error: 'activity is required' }, { status: 400 });
@@ -33,11 +33,43 @@ export async function POST(request: NextRequest) {
   const type = CARDIO_ACTIVITIES.has(activity.toLowerCase()) ? 'cardio' : 'activity';
 
   const result = await dbRun(
-    `INSERT INTO fitness_workouts (date, type, activity, duration_minutes, distance_miles, notes)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    date, type, activity, duration_minutes ?? null, distance_miles ?? null, notes ?? null
+    `INSERT INTO fitness_workouts (date, type, activity, duration_minutes, distance_miles, reps, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    date, type, activity, duration_minutes ?? null, distance_miles ?? null, reps ?? null, notes ?? null
   );
 
   const row = await dbGet('SELECT * FROM fitness_workouts WHERE id = ?', result.lastInsertRowid);
   return NextResponse.json(row, { status: 201 });
+}
+
+export async function PUT(request: NextRequest) {
+  const body = await request.json();
+  const { id, activity, date, duration_minutes, distance_miles, reps, notes } = body;
+
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  const type = activity ? (CARDIO_ACTIVITIES.has(activity.toLowerCase()) ? 'cardio' : 'activity') : undefined;
+
+  // For an update, explicitly provided fields (even if null/0) should overwrite.
+  // Only omitted fields (undefined) keep their old value.
+  const set: string[] = [];
+  const args: (string | number | null)[] = [];
+
+  if (activity !== undefined)        { set.push('activity = ?');         args.push(activity); }
+  if (date !== undefined)            { set.push('date = ?');             args.push(date); }
+  if (type !== undefined)            { set.push('type = ?');             args.push(type); }
+  if ('duration_minutes' in body)    { set.push('duration_minutes = ?'); args.push(duration_minutes ?? null); }
+  if ('distance_miles' in body)      { set.push('distance_miles = ?');   args.push(distance_miles ?? null); }
+  if ('reps' in body)                { set.push('reps = ?');             args.push(reps ?? null); }
+  if ('notes' in body)               { set.push('notes = ?');            args.push(notes ?? null); }
+
+  if (set.length > 0) {
+    args.push(id);
+    await dbRun(`UPDATE fitness_workouts SET ${set.join(', ')} WHERE id = ?`, ...args);
+  }
+
+  const row = await dbGet('SELECT * FROM fitness_workouts WHERE id = ?', id);
+  return NextResponse.json(row);
 }

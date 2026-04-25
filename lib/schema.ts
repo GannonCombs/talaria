@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -75,6 +75,7 @@ export const CREATE_TABLES_SQL = `
     activity TEXT NOT NULL DEFAULT 'run',
     duration_minutes REAL,
     distance_miles REAL,
+    reps INTEGER,
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );

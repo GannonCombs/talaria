@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import BackButton from '@/components/layout/BackButton';
-import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays, TrendingUp } from 'lucide-react';
+import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays, TrendingUp, Pencil } from 'lucide-react';
 import { DEMO_MODE } from '@/lib/config';
 import SafeChart from '@/components/shared/SafeChart';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts';
@@ -13,7 +13,7 @@ interface SplitExercise { name: string; sets: number; reps: number; weight: numb
 interface Split { id: number; name: string; muscle_groups: string[]; rotation_order: number; exercises: SplitExercise[]; }
 interface ActiveSet { reps: number; weight: number; confirmed: boolean; }
 interface ActiveExercise { name: string; sets: ActiveSet[]; }
-interface WorkoutLog { id: number; date: string; type: string; activity: string; split_name: string | null; duration_minutes: number | null; distance_miles: number | null; notes: string | null; score?: number; }
+interface WorkoutLog { id: number; date: string; type: string; activity: string; split_name: string | null; duration_minutes: number | null; distance_miles: number | null; reps: number | null; notes: string | null; score?: number; }
 
 type PageState = 'idle' | 'active' | 'cardio';
 
@@ -339,7 +339,7 @@ function generateDemoWorkouts(): WorkoutLog[] {
       demos.push({
         id: id++, date: dateStr, type: 'cardio', activity: 'run',
         split_name: null, duration_minutes: duration,
-        distance_miles: +(1.5 + (seed % 30) * 0.08).toFixed(1), notes: null,
+        distance_miles: +(1.5 + (seed % 30) * 0.08).toFixed(1), reps: null, notes: null,
         score: Math.max(1.5, Math.min(9.0, cardioScore)),
       });
       continue;
@@ -355,7 +355,7 @@ function generateDemoWorkouts(): WorkoutLog[] {
     demos.push({
       id: id++, date: dateStr, type: 'weights', activity: 'split',
       split_name: splits[splitIdx % 3], duration_minutes: null,
-      distance_miles: null, notes: null,
+      distance_miles: null, reps: null, notes: null,
       score: Math.max(1.0, Math.min(9.5, score)),
     });
     splitIdx++;
@@ -503,6 +503,7 @@ export default function FitnessTrackerPage() {
   const [knownActivities, setKnownActivities] = useState<string[]>([]);
   const [activityInput, setActivityInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [editingWorkout, setEditingWorkout] = useState<WorkoutLog | null>(null);
 
   const DEFAULT_ACTIVITIES = ['Run', 'Walk', 'Bike', 'Rock Climbing', 'Swimming', 'Hiking', 'Yoga', 'Stretching'];
 
@@ -613,18 +614,38 @@ export default function FitnessTrackerPage() {
     try {
       const rawActivity = activityInput.trim() || (data.get('activity') as string) || 'Run';
       const activity = rawActivity.replace(/\b\w/g, (c) => c.toUpperCase());
-      const res = await fetch('/api/fitness/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activity, duration_minutes: (data.get('duration') || data.get('seconds')) ? (parseFloat(data.get('duration') as string || '0') + parseFloat(data.get('seconds') as string || '0') / 60) : null, distance_miles: data.get('distance') ? parseFloat(data.get('distance') as string) : null, notes: data.get('notes') || null }) });
-      if (res.ok) {
-        const saved = await res.json();
-        setWorkouts((prev) => [saved, ...prev]);
-        form.reset();
-        setActivityInput('');
-        setCardioStatus('Saved!');
-        setPageState('idle');
-        // Refresh known activities so new ones show next time
-        fetch('/api/fitness/workouts?distinct=activities').then((r) => r.json()).then(setKnownActivities).catch(() => {});
-        setTimeout(() => setCardioStatus(''), 2000);
+      const payload = {
+        activity,
+        date: data.get('date') || undefined,
+        duration_minutes: (data.get('duration') || data.get('seconds')) ? (parseFloat(data.get('duration') as string || '0') + parseFloat(data.get('seconds') as string || '0') / 60) : null,
+        distance_miles: data.get('distance') ? parseFloat(data.get('distance') as string) : null,
+        reps: data.get('reps') ? parseInt(data.get('reps') as string, 10) : null,
+        notes: data.get('notes') || null,
+      };
+
+      if (editingWorkout) {
+        // Update existing
+        const res = await fetch('/api/fitness/workouts', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingWorkout.id, ...payload }) });
+        if (res.ok) {
+          const updated = await res.json();
+          setWorkouts((prev) => prev.map((w) => w.id === updated.id ? updated : w));
+          setCardioStatus('Updated!');
+        }
+      } else {
+        // Create new
+        const res = await fetch('/api/fitness/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (res.ok) {
+          const saved = await res.json();
+          setWorkouts((prev) => [saved, ...prev]);
+          setCardioStatus('Saved!');
+        }
       }
+      form.reset();
+      setActivityInput('');
+      setEditingWorkout(null);
+      setPageState('idle');
+      fetch('/api/fitness/workouts?distinct=activities').then((r) => r.json()).then(setKnownActivities).catch(() => {});
+      setTimeout(() => setCardioStatus(''), 2000);
     } catch { setCardioStatus('Error'); }
   };
 
@@ -714,10 +735,10 @@ export default function FitnessTrackerPage() {
       <>
         <div className="mb-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => { setPageState('idle'); setActivityInput(''); setShowSuggestions(false); }} className="text-on-surface-variant hover:text-white">
+            <button onClick={() => { setPageState('idle'); setActivityInput(''); setShowSuggestions(false); setEditingWorkout(null); }} className="text-on-surface-variant hover:text-white">
               <RotateCcw size={20} />
             </button>
-            <h1 className="text-2xl font-bold tracking-tight text-on-surface">Log Activity</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-on-surface">{editingWorkout ? 'Edit Activity' : 'Log Activity'}</h1>
           </div>
         </div>
         <form onSubmit={saveCardio} className="bg-surface-container-low border border-outline p-5 mb-6">
@@ -749,13 +770,17 @@ export default function FitnessTrackerPage() {
               </div>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Minutes</label><input type="number" name="duration" inputMode="numeric" placeholder="25" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
-            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Seconds</label><input type="number" name="seconds" inputMode="numeric" min="0" max="59" placeholder="30" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
-            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Miles</label><input type="number" name="distance" inputMode="decimal" step="any" placeholder="opt." className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+          <div className="grid grid-cols-4 gap-4 mb-4">
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Minutes</label><input type="number" name="duration" inputMode="numeric" placeholder="25" defaultValue={editingWorkout?.duration_minutes ? Math.floor(editingWorkout.duration_minutes) : undefined} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Seconds</label><input type="number" name="seconds" inputMode="numeric" min="0" max="59" placeholder="30" defaultValue={editingWorkout?.duration_minutes ? Math.round((editingWorkout.duration_minutes % 1) * 60) : undefined} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Miles</label><input type="number" name="distance" inputMode="decimal" step="any" placeholder="opt." defaultValue={editingWorkout?.distance_miles ?? undefined} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Reps</label><input type="number" name="reps" inputMode="numeric" placeholder="opt." defaultValue={editingWorkout?.reps ?? undefined} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
           </div>
-          <div className="mb-5"><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Notes</label><input type="text" name="notes" placeholder="How'd it go?" className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base text-on-surface focus:border-primary focus:outline-none" /></div>
-          <button type="submit" disabled={!activityInput.trim()} className="w-full bg-primary text-on-primary px-6 py-4 text-base font-bold disabled:opacity-40">Save</button>
+          <div className="grid grid-cols-2 gap-4 mb-5">
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Notes</label><input type="text" name="notes" placeholder="How'd it go?" defaultValue={editingWorkout?.notes ?? undefined} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base text-on-surface focus:border-primary focus:outline-none" /></div>
+            <div><label className="block text-[11px] text-on-surface-variant section-header mb-1.5">Date</label><input type="date" name="date" defaultValue={editingWorkout?.date ?? new Date().toLocaleDateString('en-CA')} className="w-full bg-surface-container-lowest border border-outline px-4 py-3 text-base font-mono text-on-surface focus:border-primary focus:outline-none" /></div>
+          </div>
+          <button type="submit" disabled={!activityInput.trim()} className="w-full bg-primary text-on-primary px-6 py-4 text-base font-bold disabled:opacity-40">{editingWorkout ? 'Update' : 'Save'}</button>
           {cardioStatus && <p className="text-center text-sm text-primary mt-3 font-mono">{cardioStatus}</p>}
         </form>
       </>
@@ -818,14 +843,28 @@ export default function FitnessTrackerPage() {
           <h3 className="text-xs text-on-surface-variant section-header mb-3">Recent</h3>
           <div className="space-y-1">
             {workouts.map((w) => (
-              <div key={w.id} className="bg-surface-container-low border border-outline px-4 py-3 flex items-center justify-between">
+              <div key={w.id} className="bg-surface-container-low border border-outline px-4 py-3 flex items-center justify-between group">
                 <div>
                   <span className="text-sm font-bold text-on-surface capitalize">{w.split_name ? `${w.split_name} Day` : w.activity}</span>
                   <span className="text-[10px] text-on-surface-variant font-mono ml-2">{w.date}</span>
                   {w.notes && <p className="text-xs text-on-surface-variant/70 mt-0.5 italic">{w.notes}</p>}
                 </div>
-                <div className="text-right text-xs font-mono text-on-surface-variant">
-                  {w.type === 'weights' ? <span className="text-primary">weights</span> : <>{w.duration_minutes && <span>{Math.round(w.duration_minutes)} min</span>}{w.distance_miles && <span className="ml-2">{w.distance_miles} mi</span>}</>}
+                <div className="flex items-center gap-3">
+                  <div className="text-right text-xs font-mono text-on-surface-variant">
+                    {w.type === 'weights' ? <span className="text-primary">weights</span> : <>{w.reps && <span>{w.reps} reps</span>}{w.duration_minutes && <span className={w.reps ? 'ml-2' : ''}>{Math.round(w.duration_minutes)} min</span>}{w.distance_miles && <span className="ml-2">{w.distance_miles} mi</span>}</>}
+                  </div>
+                  {w.type !== 'weights' && (
+                    <button
+                      onClick={() => {
+                        setEditingWorkout(w);
+                        setActivityInput(w.activity);
+                        setPageState('cardio');
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-primary transition-all duration-75"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
