@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'pages must be a positive number' }, { status: 400 });
   }
 
-  const date = new Date().toISOString().split('T')[0];
+  const date = body.date ?? new Date().toLocaleDateString('en-CA');
 
   const result = await dbRun(
     'INSERT INTO reading_logs (date, pages) VALUES (?, ?)',

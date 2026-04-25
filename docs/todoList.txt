@@ -28,6 +28,3 @@ Mid-set weight change
 Add new lifts
 Navigation
 Log old workouts
-
-*Reading*
-Create view with Stitch
