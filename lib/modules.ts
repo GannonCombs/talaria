@@ -163,13 +163,56 @@ registerModule({
   icon: 'Activity',
   route: '/fitness-tracker',
   services: [],
-  getDashboardMetrics: async () => ({
-    primary: {
-      label: 'Fitness Tracker',
-      value: '—',
-    },
-    secondary: [],
-  }),
+  getDashboardMetrics: async () => {
+    const { dbAll } = await import('./db');
+
+    // Get workouts from the last 7 days
+    const d = new Date();
+    const weekDates: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const dd = new Date(d);
+      dd.setDate(dd.getDate() - i);
+      weekDates.push(dd.toLocaleDateString('en-CA'));
+    }
+    const weekStart = weekDates[0];
+
+    const rows = await dbAll<{ date: string; cnt: number }>(
+      `SELECT date, COUNT(*) as cnt FROM fitness_workouts
+       WHERE date >= ? GROUP BY date ORDER BY date`,
+      weekStart
+    );
+    const countByDate = new Map(rows.map((r) => [r.date, Number(r.cnt)]));
+    const weekTotal = rows.reduce((s, r) => s + Number(r.cnt), 0);
+    const sparkline = weekDates.map((d) => countByDate.get(d) ?? 0);
+
+    // Streak
+    const streakRows = await dbAll<{ date: string }>(
+      'SELECT DISTINCT date FROM fitness_workouts ORDER BY date DESC LIMIT 30'
+    );
+    const dates = new Set(streakRows.map((r) => r.date));
+    let streak = 0;
+    const sd = new Date();
+    if (!dates.has(sd.toLocaleDateString('en-CA'))) sd.setDate(sd.getDate() - 1);
+    while (dates.has(sd.toLocaleDateString('en-CA'))) { streak++; sd.setDate(sd.getDate() - 1); }
+
+    // Last activity
+    const last = await dbAll<{ activity: string; date: string }>(
+      "SELECT activity, date FROM fitness_workouts WHERE activity != 'split' ORDER BY date DESC, created_at DESC LIMIT 1"
+    );
+    const lastLabel = last[0] ? last[0].activity : null;
+
+    return {
+      primary: {
+        label: 'This Week',
+        value: weekTotal > 0 ? `${weekTotal} workouts` : '—',
+      },
+      secondary: [
+        { label: 'Streak', value: streak > 0 ? `${streak}d` : '—' },
+        { label: 'Last', value: lastLabel ?? '—' },
+      ],
+      sparkline,
+    };
+  },
   getTables: () => [],
 });
 
@@ -180,38 +223,50 @@ registerModule({
   route: '/reading',
   services: [],
   getDashboardMetrics: async () => {
-    const today = new Date().toISOString().split('T')[0];
-    const { dbGet, dbAll } = await import('./db');
-    const row = await dbGet<{ total: number }>(
-      "SELECT COALESCE(SUM(pages), 0) as total FROM reading_logs WHERE date = ?",
-      today
-    );
-    const todayPages = row?.total ?? 0;
+    const { dbAll } = await import('./db');
 
-    const streakRow = await dbAll<{ date: string }>(
-      "SELECT DISTINCT date FROM reading_logs ORDER BY date DESC LIMIT 30"
-    );
-    // Count consecutive days from today/yesterday backward
-    let streak = 0;
-    const dates = new Set(streakRow.map(r => r.date));
+    // Week boundaries
     const d = new Date();
-    // If nothing logged today, start checking from yesterday
-    if (!dates.has(d.toISOString().split('T')[0])) {
-      d.setDate(d.getDate() - 1);
+    const weekDates: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const dd = new Date(d);
+      dd.setDate(dd.getDate() - i);
+      weekDates.push(dd.toLocaleDateString('en-CA'));
     }
-    while (dates.has(d.toISOString().split('T')[0])) {
-      streak++;
-      d.setDate(d.getDate() - 1);
-    }
+    const weekStart = weekDates[0];
+
+    // Pages per day this week (for sparkline)
+    const rows = await dbAll<{ date: string; total: number }>(
+      `SELECT date, SUM(pages) as total FROM reading_logs
+       WHERE date >= ? GROUP BY date ORDER BY date`,
+      weekStart
+    );
+    const pagesByDate = new Map(rows.map((r) => [r.date, Number(r.total)]));
+    const sparkline = weekDates.map((d) => pagesByDate.get(d) ?? 0);
+    const weekTotal = sparkline.reduce((s, v) => s + v, 0);
+    const daysWithData = sparkline.filter((v) => v > 0).length;
+    const dailyAvg = daysWithData > 0 ? Math.round(weekTotal / daysWithData) : 0;
+
+    // Streak
+    const streakRows = await dbAll<{ date: string }>(
+      'SELECT DISTINCT date FROM reading_logs ORDER BY date DESC LIMIT 30'
+    );
+    const dates = new Set(streakRows.map((r) => r.date));
+    let streak = 0;
+    const sd = new Date();
+    if (!dates.has(sd.toLocaleDateString('en-CA'))) sd.setDate(sd.getDate() - 1);
+    while (dates.has(sd.toLocaleDateString('en-CA'))) { streak++; sd.setDate(sd.getDate() - 1); }
 
     return {
       primary: {
-        label: 'Pages Today',
-        value: todayPages > 0 ? `${todayPages}` : '—',
+        label: 'This Week',
+        value: weekTotal > 0 ? `${weekTotal} pages` : '—',
       },
       secondary: [
         { label: 'Streak', value: streak > 0 ? `${streak}d` : '—' },
+        { label: 'Avg', value: dailyAvg > 0 ? `${dailyAvg}/day` : '—' },
       ],
+      sparkline,
     };
   },
   getTables: () => [],

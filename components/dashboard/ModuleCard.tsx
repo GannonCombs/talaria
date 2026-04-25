@@ -79,9 +79,9 @@ export default function ModuleCard({
         {/* Primary metric or custom content */}
         {primaryMetric && !customContent && (
           <div className="my-2">
-            <div className="grid grid-cols-3 items-center">
-              <div className="col-span-1">
-                <span className="font-mono text-3xl font-bold text-white tracking-tighter">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="font-mono text-3xl font-bold text-white tracking-tighter whitespace-nowrap">
                   {primaryMetric.value}
                 </span>
                 {primaryMetric.trend && (
@@ -93,10 +93,7 @@ export default function ModuleCard({
                   </span>
                 )}
               </div>
-              <div className="col-span-1">
-                {sparkline && <Sparkline data={sparkline} direction={primaryMetric.trendDirection} />}
-              </div>
-              <div className="col-span-1" />
+              {sparkline && <Sparkline data={sparkline} direction={primaryMetric.trendDirection} />}
             </div>
             <div className="text-[10px] text-on-surface-variant font-mono uppercase mt-1">
               {primaryMetric.label}
