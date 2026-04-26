@@ -46,38 +46,79 @@ export interface ResyReservation {
   status: string;          // "confirmed", "cancelled"
 }
 
-// ── Credentials ────────────────────────────────────────────────────────────
-
-function getResyCredentials(): { apiKey: string; authToken: string } {
-  // Check .env.local first, then mpp-reseller/.env
-  const apiKey = process.env.RESY_API_KEY ?? '';
-  const authToken = process.env.RESY_AUTH_TOKEN ?? '';
-
-  if (apiKey && authToken) return { apiKey, authToken };
-
-  // Fall back to mpp-reseller/.env
-  try {
-    const envPath = path.join(process.cwd(), 'mpp-reseller', '.env');
-    const content = fs.readFileSync(envPath, 'utf8');
-    const keyMatch = content.match(/RESY_API_KEY=(.+)/);
-    const tokenMatch = content.match(/RESY_AUTH_TOKEN=(.+)/);
-    return {
-      apiKey: keyMatch?.[1]?.trim() ?? '',
-      authToken: tokenMatch?.[1]?.trim() ?? '',
-    };
-  } catch {
-    return { apiKey: '', authToken: '' };
-  }
-}
+// ── Credentials & Token Refresh ────────────────────────────────────────────
 
 const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3.1 Safari/605.1.15';
 
+function getResellerEnv(key: string): string {
+  try {
+    const envPath = path.join(process.cwd(), 'mpp-reseller', '.env');
+    const content = fs.readFileSync(envPath, 'utf8');
+    const match = content.match(new RegExp(`^${key}=(.+)$`, 'm'));
+    return match?.[1]?.trim() ?? '';
+  } catch { return ''; }
+}
+
+function getEnv(key: string): string {
+  return process.env[key] ?? getResellerEnv(key);
+}
+
+const RESY_BASE = 'https://api.resy.com';
+
+// In-memory token — starts from env, refreshed automatically on 401/419.
+let cachedAuthToken: string | null = null;
+
+function getApiKey(): string {
+  return getEnv('RESY_API_KEY');
+}
+
+function getAuthToken(): string {
+  if (cachedAuthToken) return cachedAuthToken;
+  cachedAuthToken = getEnv('RESY_AUTH_TOKEN');
+  return cachedAuthToken;
+}
+
+export async function refreshResyToken(): Promise<string> {
+  const apiKey = getApiKey();
+  const email = getEnv('RESY_EMAIL');
+  const password = getEnv('RESY_PASSWORD');
+
+  if (!email || !password) {
+    throw new Error('RESY_EMAIL and RESY_PASSWORD required for token refresh');
+  }
+
+  const res = await fetch(`${RESY_BASE}/3/auth/password`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `ResyAPI api_key="${apiKey}"`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Origin': 'https://resy.com',
+      'Referer': 'https://resy.com/',
+      'User-Agent': BROWSER_UA,
+    },
+    body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Resy token refresh failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  if (!data.token) {
+    throw new Error('Resy token refresh returned no token');
+  }
+
+  cachedAuthToken = data.token;
+  console.log('[resy] Token refreshed successfully');
+  return data.token;
+}
+
 function resyHeaders(): Record<string, string> {
-  const { apiKey, authToken } = getResyCredentials();
   return {
-    'Authorization': `ResyAPI api_key="${apiKey}"`,
-    'X-Resy-Auth-Token': authToken,
-    'X-Resy-Universal-Auth': authToken,
+    'Authorization': `ResyAPI api_key="${getApiKey()}"`,
+    'X-Resy-Auth-Token': getAuthToken(),
+    'X-Resy-Universal-Auth': getAuthToken(),
     'Accept': 'application/json',
     'Content-Type': 'application/json',
     'Origin': 'https://resy.com',
@@ -86,9 +127,27 @@ function resyHeaders(): Record<string, string> {
   };
 }
 
-// ── API calls ──────────────────────────────────────────────────────────────
+// Retry wrapper: if a Resy call returns 401 or 419, refresh token and retry once.
+async function resyFetchWithRetry(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const res = await fetch(url, { ...init, headers: { ...resyHeaders(), ...(init.headers ?? {}) } });
 
-const RESY_BASE = 'https://api.resy.com';
+  if (res.status === 401 || res.status === 419) {
+    try {
+      await refreshResyToken();
+    } catch {
+      return res; // Refresh failed — return the original error response
+    }
+    // Retry with fresh token
+    return fetch(url, { ...init, headers: { ...resyHeaders(), ...(init.headers ?? {}) } });
+  }
+
+  return res;
+}
+
+// ── API calls ──────────────────────────────────────────────────────────────
 
 export async function searchRestaurants(params: {
   lat?: number;
@@ -104,9 +163,8 @@ export async function searchRestaurants(params: {
 
   const today = new Date().toISOString().split('T')[0];
 
-  const res = await fetch(`${RESY_BASE}/3/venuesearch/search`, {
+  const res = await resyFetchWithRetry(`${RESY_BASE}/3/venuesearch/search`, {
     method: 'POST',
-    headers: resyHeaders(),
     body: JSON.stringify({
       geo: { latitude: lat, longitude: lng, radius },
       query: params.query ?? '',
@@ -154,9 +212,8 @@ export async function getAvailability(params: {
   date: string;            // YYYY-MM-DD
   partySize: number;
 }): Promise<ResyTimeSlot[]> {
-  const res = await fetch(`${RESY_BASE}/4/find`, {
+  const res = await resyFetchWithRetry(`${RESY_BASE}/4/find`, {
     method: 'POST',
-    headers: resyHeaders(),
     body: JSON.stringify({
       lat: 0,
       long: 0,
@@ -195,9 +252,8 @@ export async function getBookingDetails(params: {
   date: string;
   partySize: number;
 }): Promise<ResyBookingDetails> {
-  const res = await fetch(`${RESY_BASE}/3/details`, {
+  const res = await resyFetchWithRetry(`${RESY_BASE}/3/details`, {
     method: 'POST',
-    headers: resyHeaders(),
     body: JSON.stringify({
       config_id: params.configToken,
       day: params.date,
@@ -222,9 +278,8 @@ export async function bookReservation(params: {
   bookToken: string;
   paymentMethodId: number;
 }): Promise<{ resyToken: string }> {
-  const res = await fetch(`${RESY_BASE}/3/book`, {
+  const res = await resyFetchWithRetry(`${RESY_BASE}/3/book`, {
     method: 'POST',
-    headers: resyHeaders(),
     body: JSON.stringify({
       book_token: params.bookToken,
       struct_payment_method: { id: params.paymentMethodId },
@@ -242,8 +297,8 @@ export async function bookReservation(params: {
 }
 
 export async function getMyReservations(): Promise<ResyReservation[]> {
-  const res = await fetch(`${RESY_BASE}/3/user/reservations`, {
-    headers: resyHeaders(),
+  const res = await resyFetchWithRetry(`${RESY_BASE}/3/user/reservations`, {
+    method: 'GET',
     signal: AbortSignal.timeout(10000),
   });
 
@@ -273,9 +328,8 @@ export async function getMyReservations(): Promise<ResyReservation[]> {
 export async function cancelReservation(params: {
   resyToken: string;
 }): Promise<void> {
-  const res = await fetch(`${RESY_BASE}/3/cancel`, {
+  const res = await resyFetchWithRetry(`${RESY_BASE}/3/cancel`, {
     method: 'POST',
-    headers: resyHeaders(),
     body: JSON.stringify({ resy_token: params.resyToken }),
     signal: AbortSignal.timeout(10000),
   });

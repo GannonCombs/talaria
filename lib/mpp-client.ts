@@ -206,63 +206,14 @@ function rewriteToUpstream(url: string): { upstreamUrl: string; init?: RequestIn
     return { upstreamUrl: `https://finnhub.io/api/v1/quote?${params}` };
   }
 
-  // Resy Search
+  // Resy Search — delegate to the resy-client which handles token refresh
   if (pathname === '/resy/search') {
-    const apiKey = getResellerEnv('RESY_API_KEY');
-    const authToken = getResellerEnv('RESY_AUTH_TOKEN');
-    if (!apiKey || !authToken) return null;
-    return {
-      upstreamUrl: `https://api.resy.com/3/venuesearch/search`,
-      init: {
-        method: 'POST',
-        headers: {
-          'Authorization': `ResyAPI api_key="${apiKey}"`,
-          'X-Resy-Auth-Token': authToken,
-          'X-Resy-Universal-Auth': authToken,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Origin': 'https://resy.com',
-          'Referer': 'https://resy.com/',
-          'User-Agent': RESY_UA,
-        },
-        body: JSON.stringify({
-          geo: { latitude: Number(params.get('lat') ?? 30.2672), longitude: Number(params.get('long') ?? -97.7431), radius: 32186 },
-          query: params.get('query') ?? '',
-          per_page: Number(params.get('per_page') ?? 10),
-          page: 1,
-          slot_filter: { day: params.get('day') ?? new Date().toISOString().split('T')[0], party_size: Number(params.get('party_size') ?? 2) },
-        }),
-      },
-    };
+    return { useResyClient: 'search', params } as unknown as { upstreamUrl: string; init?: RequestInit };
   }
 
-  // Resy Availability
+  // Resy Availability — delegate to the resy-client which handles token refresh
   if (pathname === '/resy/availability') {
-    const apiKey = getResellerEnv('RESY_API_KEY');
-    const authToken = getResellerEnv('RESY_AUTH_TOKEN');
-    if (!apiKey || !authToken) return null;
-    return {
-      upstreamUrl: `https://api.resy.com/4/find`,
-      init: {
-        method: 'POST',
-        headers: {
-          'Authorization': `ResyAPI api_key="${apiKey}"`,
-          'X-Resy-Auth-Token': authToken,
-          'X-Resy-Universal-Auth': authToken,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'Origin': 'https://resy.com',
-          'Referer': 'https://resy.com/',
-          'User-Agent': RESY_UA,
-        },
-        body: JSON.stringify({
-          venue_id: Number(params.get('venue_id')),
-          day: params.get('day'),
-          party_size: Number(params.get('party_size') ?? 2),
-          lat: 0, long: 0,
-        }),
-      },
-    };
+    return { useResyClient: 'availability', params } as unknown as { upstreamUrl: string; init?: RequestInit };
   }
 
   return null; // Not a bypassable route
@@ -284,9 +235,38 @@ export async function paidFetch(
   // Bypass: if proxy charging is off and this is a local reseller URL,
   // call the upstream API directly and log at $0.00.
   if (await isProxyChargingOff()) {
-    const rewrite = rewriteToUpstream(url);
+    const rewrite = rewriteToUpstream(url) as { upstreamUrl?: string; init?: RequestInit; useResyClient?: string; params?: URLSearchParams } | null;
     if (rewrite) {
-      const res = await fetch(rewrite.upstreamUrl, rewrite.init ?? init);
+      let res: Response;
+
+      if (rewrite.useResyClient) {
+        // Delegate to resy-client which handles token refresh
+        const { searchRestaurants, getAvailability } = await import('./modules/food/resy-client');
+        const p = rewrite.params!;
+        if (rewrite.useResyClient === 'search') {
+          const restaurants = await searchRestaurants({
+            lat: Number(p.get('lat') ?? 30.2672),
+            lng: Number(p.get('long') ?? -97.7431),
+            query: p.get('query') ?? '',
+            perPage: Number(p.get('per_page') ?? 10),
+          });
+          res = new Response(JSON.stringify({ search: { hits: restaurants } }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        } else {
+          const slots = await getAvailability({
+            venueId: Number(p.get('venue_id')),
+            date: p.get('day') ?? new Date().toISOString().split('T')[0],
+            partySize: Number(p.get('party_size') ?? 2),
+          });
+          res = new Response(JSON.stringify({ results: { venues: [{ slots }] } }), {
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+      } else {
+        res = await fetch(rewrite.upstreamUrl!, rewrite.init ?? init);
+      }
+
       await logMppTransaction({
         service: opts?.service ?? extractServiceName(url),
         module: opts?.module ?? 'unknown',
