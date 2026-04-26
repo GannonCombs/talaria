@@ -679,7 +679,17 @@ export default function FitnessTrackerPage() {
             <div key={exIdx} className="bg-surface-container-low border border-outline p-4">
               <div className="flex items-center gap-2 mb-4">
                 <Dumbbell size={16} className="text-primary" strokeWidth={1.5} />
-                <span className="text-sm font-bold text-on-surface">{ex.name}</span>
+                <input
+                  data-exercise-name
+                  type="text"
+                  value={ex.name}
+                  onChange={(e) => {
+                    setExercises((prev) => prev.map((ex2, i) =>
+                      i === exIdx ? { ...ex2, name: e.target.value } : ex2
+                    ));
+                  }}
+                  className="text-sm font-bold text-on-surface bg-transparent focus:outline-none focus:border-b focus:border-primary"
+                />
               </div>
 
               <div className="flex flex-wrap gap-3 items-start">
@@ -709,6 +719,24 @@ export default function FitnessTrackerPage() {
             </div>
           ))}
         </div>
+
+        <button
+          onClick={() => {
+            setExercises((prev) => [...prev, {
+              name: 'New Exercise',
+              sets: [{ reps: 10, weight: 0, confirmed: false }, { reps: 10, weight: 0, confirmed: false }, { reps: 10, weight: 0, confirmed: false }],
+            }]);
+            // Focus the name input after render
+            setTimeout(() => {
+              const inputs = document.querySelectorAll<HTMLInputElement>('[data-exercise-name]');
+              const last = inputs[inputs.length - 1];
+              if (last) { last.focus(); last.select(); }
+            }, 50);
+          }}
+          className="w-full py-3 text-xs font-bold border border-dashed border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1.5"
+        >
+          <Plus size={14} /> Add Exercise
+        </button>
 
         <p className="text-[10px] text-on-surface-variant text-center mt-4">
           Tap to confirm · Hold + drag to adjust · Double-tap for precise edit

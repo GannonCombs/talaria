@@ -12,18 +12,15 @@ Buy vs rent calculator
 Alerts/email? Maybe once I'm more seriously shopping.
 
 *Portfolio*
+
 Tax section. Edit: no more filing, but still holds tax details.
 CSVs - Fid (better), Binance (better), Kraken, OKX?
 News alert? For trading something big quickly.
 
-*Food*
-Token Management
-
 *Fitness Tracker*
+
 Scoring system
 Better cloud system to run from phone remotely
 Implement good UI
 Ghost mode/Social mode
-Mid-set weight change
-Add new lifts
 Navigation

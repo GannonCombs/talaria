@@ -27,11 +27,11 @@ export default function TopBar() {
   return (
     <>
       <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-14 bg-background border-b border-outline">
-        <div className="flex items-center">
+        <Link href="/" className="flex items-center">
           <span className="text-xl font-black tracking-tighter text-primary uppercase">
             TALARIA
           </span>
-        </div>
+        </Link>
 
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
