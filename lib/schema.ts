@@ -189,6 +189,8 @@ export const DEFAULT_PREFERENCES: Record<string, string> = {
   'housing.scoring_weights': '{"crime":9,"schools":5,"commute_work":7,"commute_social":6,"walkability":2,"avm":5,"price":8}',
   'housing.alert_min_score': '85',
   'housing.max_price': '550000',
+  // MPP proxy charging — 'on' routes through Tempo reseller, 'off' calls upstream directly
+  'mpp.proxy_charging': 'on',
 };
 
 export const DEFAULT_MODULES = [

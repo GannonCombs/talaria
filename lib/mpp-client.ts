@@ -136,14 +136,168 @@ function extractServiceName(url: string): string {
   }
 }
 
+// ── Direct bypass for local reseller when proxy charging is off ─────────
+
+import fs from 'fs';
+import path from 'path';
+
+function getResellerEnv(key: string): string {
+  try {
+    const envPath = path.join(process.cwd(), 'mpp-reseller', '.env');
+    const content = fs.readFileSync(envPath, 'utf8');
+    const match = content.match(new RegExp(`^${key}=(.+)$`, 'm'));
+    return match?.[1]?.trim() ?? '';
+  } catch { return ''; }
+}
+
+const RESY_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3.1 Safari/605.1.15';
+
+async function isProxyChargingOff(): Promise<boolean> {
+  const row = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'mpp.proxy_charging'"
+  );
+  return row?.value === 'off';
+}
+
+// Rewrite a local reseller URL to the upstream API with the user's own keys.
+// Returns null if the URL is not a bypassable local reseller route.
+function rewriteToUpstream(url: string): { upstreamUrl: string; init?: RequestInit } | null {
+  const parsed = new URL(url);
+  if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') return null;
+
+  const pathname = parsed.pathname;
+  const params = parsed.searchParams;
+
+  // Google Maps Street View
+  if (pathname === '/maps/streetview') {
+    const key = getResellerEnv('GOOGLE_MAPS_API_KEY');
+    if (!key) return null;
+    params.set('key', key);
+    return { upstreamUrl: `https://maps.googleapis.com/maps/api/streetview?${params}` };
+  }
+
+  // Google Maps Text Search
+  if (pathname === '/maps/place/textsearch/json') {
+    const key = getResellerEnv('GOOGLE_MAPS_API_KEY');
+    if (!key) return null;
+    params.set('key', key);
+    return { upstreamUrl: `https://maps.googleapis.com/maps/api/place/textsearch/json?${params}` };
+  }
+
+  // Google Maps Place Photo
+  if (pathname.startsWith('/maps/place/photo') || pathname.match(/\/places\/v1\/places\/.+\/photos\/.+\/media/)) {
+    const key = getResellerEnv('GOOGLE_MAPS_API_KEY');
+    if (!key) return null;
+    // For the photo reference format
+    if (params.has('photoreference')) {
+      params.set('key', key);
+      return { upstreamUrl: `https://maps.googleapis.com/maps/api/place/photo?${params}` };
+    }
+    // For the Places API New format
+    params.set('key', key);
+    return { upstreamUrl: `https://places.googleapis.com${pathname}?${params}` };
+  }
+
+  // Finnhub Quote
+  if (pathname === '/quote') {
+    const key = getResellerEnv('FINNHUB_API_KEY');
+    if (!key) return null;
+    params.set('token', key);
+    return { upstreamUrl: `https://finnhub.io/api/v1/quote?${params}` };
+  }
+
+  // Resy Search
+  if (pathname === '/resy/search') {
+    const apiKey = getResellerEnv('RESY_API_KEY');
+    const authToken = getResellerEnv('RESY_AUTH_TOKEN');
+    if (!apiKey || !authToken) return null;
+    return {
+      upstreamUrl: `https://api.resy.com/3/venuesearch/search`,
+      init: {
+        method: 'POST',
+        headers: {
+          'Authorization': `ResyAPI api_key="${apiKey}"`,
+          'X-Resy-Auth-Token': authToken,
+          'X-Resy-Universal-Auth': authToken,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Origin': 'https://resy.com',
+          'Referer': 'https://resy.com/',
+          'User-Agent': RESY_UA,
+        },
+        body: JSON.stringify({
+          geo: { latitude: Number(params.get('lat') ?? 30.2672), longitude: Number(params.get('long') ?? -97.7431), radius: 32186 },
+          query: params.get('query') ?? '',
+          per_page: Number(params.get('per_page') ?? 10),
+          page: 1,
+          slot_filter: { day: params.get('day') ?? new Date().toISOString().split('T')[0], party_size: Number(params.get('party_size') ?? 2) },
+        }),
+      },
+    };
+  }
+
+  // Resy Availability
+  if (pathname === '/resy/availability') {
+    const apiKey = getResellerEnv('RESY_API_KEY');
+    const authToken = getResellerEnv('RESY_AUTH_TOKEN');
+    if (!apiKey || !authToken) return null;
+    return {
+      upstreamUrl: `https://api.resy.com/4/find`,
+      init: {
+        method: 'POST',
+        headers: {
+          'Authorization': `ResyAPI api_key="${apiKey}"`,
+          'X-Resy-Auth-Token': authToken,
+          'X-Resy-Universal-Auth': authToken,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Origin': 'https://resy.com',
+          'Referer': 'https://resy.com/',
+          'User-Agent': RESY_UA,
+        },
+        body: JSON.stringify({
+          venue_id: Number(params.get('venue_id')),
+          day: params.get('day'),
+          party_size: Number(params.get('party_size') ?? 2),
+          lat: 0, long: 0,
+        }),
+      },
+    };
+  }
+
+  return null; // Not a bypassable route
+}
+
 // Approval-gated paid fetch. Validates spending limits, requests
 // biometric approval (if configured), reserves a pending transaction,
 // then executes the MPP payment. On failure, marks the transaction failed.
+//
+// When mpp.proxy_charging is 'off', local reseller URLs are rewritten
+// to call upstream APIs directly with the user's own keys — no Tempo
+// charge, no approval gate. External MPP hosts (RentCast, Mapbox)
+// always go through the paid flow.
 export async function paidFetch(
   url: string,
   init?: RequestInit,
   opts?: PaidFetchOptions,
 ): Promise<Response> {
+  // Bypass: if proxy charging is off and this is a local reseller URL,
+  // call the upstream API directly and log at $0.00.
+  if (await isProxyChargingOff()) {
+    const rewrite = rewriteToUpstream(url);
+    if (rewrite) {
+      const res = await fetch(rewrite.upstreamUrl, rewrite.init ?? init);
+      await logMppTransaction({
+        service: opts?.service ?? extractServiceName(url),
+        module: opts?.module ?? 'unknown',
+        endpoint: opts?.endpoint,
+        costUsd: 0,
+        metadata: { via: 'direct (proxy charging off)' },
+      });
+      return res;
+    }
+  }
+
   const cost = opts?.estimatedCost ?? estimateCost(url);
 
   // 1. Validate against hard limits

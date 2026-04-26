@@ -142,6 +142,28 @@ function SpendingControlsSection({
             onUpdate('low_balance_alert', v ? '2.00' : '0')
           }
         />
+        <div className="py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm text-on-surface">Proxy charging</span>
+              <p className="text-[10px] text-on-surface-variant mt-0.5">
+                {prefs['mpp.proxy_charging'] === 'off'
+                  ? 'Off — API calls use your own keys directly (free)'
+                  : 'On — API calls route through Tempo payment proxy'}
+              </p>
+            </div>
+            <button
+              onClick={() => onUpdate('mpp.proxy_charging', prefs['mpp.proxy_charging'] === 'off' ? 'on' : 'off')}
+              className={`w-10 h-5 flex items-center px-0.5 transition-colors duration-75 ${
+                prefs['mpp.proxy_charging'] === 'off' ? 'bg-on-surface-variant/30' : 'bg-primary'
+              }`}
+            >
+              <div className={`w-4 h-4 bg-white transition-transform duration-75 ${
+                prefs['mpp.proxy_charging'] === 'off' ? '' : 'translate-x-5'
+              }`} />
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   );
