@@ -252,34 +252,34 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
           args: ['Chest + Tri', '["Chest","Triceps","Shoulders"]', 0, JSON.stringify([
-            { name: 'Military Bench', sets: 3, reps: 10, weight: 0 },
-            { name: 'Tri Pull Down', sets: 3, reps: 12, weight: 0 },
-            { name: 'Shoulder Raise', sets: 3, reps: 12, weight: 0 },
-            { name: 'Chest Press Machine', sets: 3, reps: 10, weight: 0 },
-            { name: 'Flys', sets: 3, reps: 12, weight: 0 },
-            { name: 'Planks', sets: 3, reps: 1, weight: 0 },
+            { name: 'Military Bench', sets: 3, reps: 10, weight: 0, difficulty: 1.2 },
+            { name: 'Tri Pull Down', sets: 3, reps: 12, weight: 0, difficulty: 0.8 },
+            { name: 'Shoulder Raise', sets: 3, reps: 12, weight: 0, difficulty: 0.8 },
+            { name: 'Chest Press Machine', sets: 3, reps: 10, weight: 0, difficulty: 1.1 },
+            { name: 'Flys', sets: 3, reps: 12, weight: 0, difficulty: 0.8 },
+            { name: 'Planks', sets: 3, reps: 1, weight: 0, difficulty: 1.0 },
           ])],
         },
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
           args: ['Back + Bi', '["Back","Biceps"]', 1, JSON.stringify([
-            { name: 'Lat Pulldowns', sets: 3, reps: 10, weight: 0 },
-            { name: 'Dumbbell Curls', sets: 3, reps: 12, weight: 0 },
-            { name: 'Row Machine', sets: 3, reps: 10, weight: 0 },
-            { name: 'Dumbbell Rows', sets: 3, reps: 10, weight: 0 },
-            { name: 'Victory', sets: 3, reps: 12, weight: 0 },
-            { name: 'Russian Twists', sets: 3, reps: 20, weight: 0 },
+            { name: 'Lat Pulldowns', sets: 3, reps: 10, weight: 0, difficulty: 1.1 },
+            { name: 'Dumbbell Curls', sets: 3, reps: 12, weight: 0, difficulty: 0.7 },
+            { name: 'Row Machine', sets: 3, reps: 10, weight: 0, difficulty: 1.1 },
+            { name: 'Dumbbell Rows', sets: 3, reps: 10, weight: 0, difficulty: 1.0 },
+            { name: 'Victory', sets: 3, reps: 12, weight: 0, difficulty: 0.7 },
+            { name: 'Russian Twists', sets: 3, reps: 20, weight: 0, difficulty: 0.8 },
           ])],
         },
         {
           sql: 'INSERT INTO fitness_splits (name, muscle_groups, rotation_order, exercises) VALUES (?, ?, ?, ?)',
           args: ['Legs', '["Quads","Hamstrings","Glutes","Calves"]', 2, JSON.stringify([
-            { name: 'Quad Press', sets: 3, reps: 10, weight: 0 },
-            { name: 'Hammy Machine', sets: 3, reps: 12, weight: 0 },
-            { name: 'Quad Machine', sets: 3, reps: 12, weight: 0 },
-            { name: 'Calf Raise Machine', sets: 3, reps: 15, weight: 0 },
-            { name: 'Glute', sets: 3, reps: 12, weight: 0 },
-            { name: 'Inner Thigh Machine', sets: 3, reps: 12, weight: 0 },
+            { name: 'Quad Press', sets: 3, reps: 10, weight: 0, difficulty: 1.3 },
+            { name: 'Hammy Machine', sets: 3, reps: 12, weight: 0, difficulty: 0.8 },
+            { name: 'Quad Machine', sets: 3, reps: 12, weight: 0, difficulty: 0.8 },
+            { name: 'Calf Raise Machine', sets: 3, reps: 15, weight: 0, difficulty: 0.7 },
+            { name: 'Glute', sets: 3, reps: 12, weight: 0, difficulty: 0.9 },
+            { name: 'Inner Thigh Machine', sets: 3, reps: 12, weight: 0, difficulty: 0.7 },
           ])],
         },
         {
@@ -341,6 +341,45 @@ async function runMigrations(client: Client, fromVersion: number): Promise<void>
   if (fromVersion < 14) {
     if (!(await hasColumn(client, 'fitness_workouts', 'reps'))) {
       await client.execute('ALTER TABLE fitness_workouts ADD COLUMN reps INTEGER');
+    }
+  }
+
+  if (fromVersion < 15) {
+    if (!(await hasColumn(client, 'fitness_workouts', 'score'))) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN score REAL');
+    }
+    if (!(await hasColumn(client, 'fitness_workouts', 'effort_units'))) {
+      await client.execute('ALTER TABLE fitness_workouts ADD COLUMN effort_units REAL');
+    }
+
+    // Seed difficulty coefficients into existing splits
+    const DEFAULT_DIFFICULTIES: Record<string, number> = {
+      'military bench': 1.2, 'tri pull down': 0.8, 'shoulder raise': 0.8,
+      'chest press machine': 1.1, 'flys': 0.8, 'planks': 1.0,
+      'lat pulldowns': 1.1, 'dumbbell curls': 0.7, 'row machine': 1.1,
+      'dumbbell rows': 1.0, 'victory': 0.7, 'russian twists': 0.8,
+      'quad press': 1.3, 'hammy machine': 0.8, 'quad machine': 0.8,
+      'calf raise machine': 0.7, 'glute': 0.9, 'inner thigh machine': 0.7,
+    };
+
+    const existingSplits = await client.execute('SELECT id, exercises FROM fitness_splits');
+    for (const row of existingSplits.rows) {
+      try {
+        const exercises = JSON.parse(String(row.exercises)) as Array<{ name: string; difficulty?: number }>;
+        let changed = false;
+        for (const ex of exercises) {
+          if (ex.difficulty === undefined) {
+            ex.difficulty = DEFAULT_DIFFICULTIES[ex.name.toLowerCase()] ?? 1.0;
+            changed = true;
+          }
+        }
+        if (changed) {
+          await client.execute({
+            sql: 'UPDATE fitness_splits SET exercises = ? WHERE id = ?',
+            args: [JSON.stringify(exercises), row.id as number],
+          });
+        }
+      } catch {}
     }
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbRun, dbGet, dbBatch } from '@/lib/db';
+import { dbRun, dbGet, dbAll, dbBatch } from '@/lib/db';
+import { computeWeightsEffort, effortToScore, type ScoredExercise } from '@/lib/modules/fitness/scoring';
 
 interface SetData {
   set_number: number;
@@ -74,6 +75,42 @@ export async function POST(request: NextRequest) {
         );
       }
     }
+
+    // Compute score from volume
+    // Look up difficulty coefficients from the split's exercises JSON
+    const workoutRow = await dbGet<{ split_id: number | null; split_name: string | null }>(
+      'SELECT split_id, split_name FROM fitness_workouts WHERE id = ?', workoutId
+    );
+    let coefficients = new Map<string, number>();
+    if (workoutRow?.split_id) {
+      const split = await dbGet<{ exercises: string }>(
+        'SELECT exercises FROM fitness_splits WHERE id = ?', workoutRow.split_id
+      );
+      if (split?.exercises) {
+        try {
+          const parsed = JSON.parse(split.exercises) as Array<{ name: string; difficulty?: number }>;
+          for (const ex of parsed) {
+            if (ex.difficulty) coefficients.set(ex.name.toLowerCase(), ex.difficulty);
+          }
+        } catch {}
+      }
+    }
+
+    const scoredExercises: ScoredExercise[] = exercises.map((ex) => ({
+      name: ex.exercise_name,
+      difficulty: coefficients.get(ex.exercise_name.toLowerCase()) ?? 1.0,
+      sets: ex.sets
+        .filter((s) => s.weight != null && s.reps != null)
+        .map((s) => ({ weight: s.weight!, reps: s.reps! })),
+    }));
+
+    const effort = computeWeightsEffort(scoredExercises);
+    const score = effortToScore(effort);
+
+    await dbRun(
+      'UPDATE fitness_workouts SET score = ?, effort_units = ? WHERE id = ?',
+      score, effort, workoutId
+    );
 
     // Advance rotation
     const workout = await dbGet<{ split_id: number | null }>(

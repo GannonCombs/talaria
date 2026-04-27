@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export const CREATE_TABLES_SQL = `
   CREATE TABLE IF NOT EXISTS mpp_transactions (
@@ -77,6 +77,8 @@ export const CREATE_TABLES_SQL = `
     distance_miles REAL,
     reps INTEGER,
     notes TEXT,
+    score REAL,
+    effort_units REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -191,6 +193,8 @@ export const DEFAULT_PREFERENCES: Record<string, string> = {
   'housing.max_price': '550000',
   // MPP proxy charging — 'on' routes through Tempo reseller, 'off' calls upstream directly
   'mpp.proxy_charging': 'on',
+  // Fitness
+  'fitness.body_weight': '',
 };
 
 export const DEFAULT_MODULES = [

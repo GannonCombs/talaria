@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbAll, dbRun, dbGet } from '@/lib/db';
+import { computeCardioEffort, computeBodyweightEffort, effortToScore } from '@/lib/modules/fitness/scoring';
 
 const CARDIO_ACTIVITIES = new Set(['run', 'walk', 'bike']);
 
@@ -32,10 +33,27 @@ export async function POST(request: NextRequest) {
   const date = body.date ?? new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
   const type = CARDIO_ACTIVITIES.has(activity.toLowerCase()) ? 'cardio' : 'activity';
 
+  // Compute effort and score
+  const bwRow = await dbGet<{ value: string }>(
+    "SELECT value FROM user_preferences WHERE key = 'fitness.body_weight'"
+  );
+  const bodyWeight = parseFloat(bwRow?.value ?? '0') || 170;
+
+  let effort = 0;
+  if (duration_minutes && duration_minutes > 0) {
+    // Cardio: has duration
+    effort = computeCardioEffort(activity, duration_minutes, bodyWeight);
+  } else if (reps && reps > 0) {
+    // Bodyweight: has reps but no duration
+    effort = computeBodyweightEffort(activity, reps, bodyWeight);
+  }
+  const score = effort > 0 ? effortToScore(effort) : null;
+
   const result = await dbRun(
-    `INSERT INTO fitness_workouts (date, type, activity, duration_minutes, distance_miles, reps, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    date, type, activity, duration_minutes ?? null, distance_miles ?? null, reps ?? null, notes ?? null
+    `INSERT INTO fitness_workouts (date, type, activity, duration_minutes, distance_miles, reps, notes, score, effort_units)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    date, type, activity, duration_minutes ?? null, distance_miles ?? null, reps ?? null, notes ?? null,
+    score, effort > 0 ? effort : null
   );
 
   const row = await dbGet('SELECT * FROM fitness_workouts WHERE id = ?', result.lastInsertRowid);

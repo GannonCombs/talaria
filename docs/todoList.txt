@@ -19,7 +19,6 @@ News alert? For trading something big quickly.
 
 *Fitness Tracker*
 
-Scoring system
 Better cloud system to run from phone remotely
 Implement good UI
 Ghost mode/Social mode

@@ -138,7 +138,7 @@ function SetBubble({
         <span className={`font-mono font-bold text-lg leading-none ${
           set.confirmed ? 'text-primary' : 'text-on-surface'
         } ${!set.confirmed && !dragging ? 'opacity-70' : ''}`}>
-          {dragging === 'weight' ? dragValue : (set.weight > 0 ? set.weight : 10)}
+          {dragging === 'weight' ? dragValue : set.weight}
         </span>
 
         {set.confirmed && !dragging && (
@@ -243,8 +243,8 @@ function ScoreTimeline({ workouts }: { workouts: WorkoutLog[] }) {
               tick={{ fontSize: 9, fill: '#8b949e', fontFamily: 'var(--font-mono)' }}
               axisLine={false}
               tickLine={false}
-              interval="preserveStartEnd"
-              minTickGap={40}
+              interval={0}
+              minTickGap={20}
             />
             <YAxis
               domain={[0, 10]}
@@ -272,8 +272,8 @@ function ScoreTimeline({ workouts }: { workouts: WorkoutLog[] }) {
               stroke="#46f1c5"
               strokeWidth={1.5}
               fill="url(#scoreGradient)"
-              dot={{ r: 1.5, fill: '#46f1c5', strokeWidth: 0 }}
-              activeDot={{ r: 4, fill: '#46f1c5', stroke: '#10141a', strokeWidth: 2 }}
+              dot={{ r: 3, fill: '#46f1c5', strokeWidth: 0 }}
+              activeDot={{ r: 5, fill: '#46f1c5', stroke: '#10141a', strokeWidth: 2 }}
             />
             <Line
               type="monotone"
@@ -504,12 +504,19 @@ export default function FitnessTrackerPage() {
   const [activityInput, setActivityInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState<WorkoutLog | null>(null);
+  const [bodyWeight, setBodyWeight] = useState<string>('');
+  const [bodyWeightInput, setBodyWeightInput] = useState('');
 
   const DEFAULT_ACTIVITIES = ['Run', 'Walk', 'Bike', 'Rock Climbing', 'Swimming', 'Hiking', 'Yoga', 'Stretching'];
 
   useEffect(() => {
     fetch('/api/fitness/splits').then((r) => r.json()).then((d) => { setSplits(d.splits); setCurrentSplitIndex(d.currentSplitIndex ?? 0); }).catch(() => {});
     fetch('/api/fitness/workouts?distinct=activities').then((r) => r.json()).then((acts: string[]) => setKnownActivities(acts)).catch(() => {});
+    // Load body weight preference
+    fetch('/api/preferences').then((r) => r.json()).then((prefs: Record<string, string>) => {
+      const bw = prefs['fitness.body_weight'];
+      if (bw) { setBodyWeight(bw); setBodyWeightInput(bw); }
+    }).catch(() => {});
     fetch('/api/fitness/workouts').then((r) => r.json()).then((real: WorkoutLog[]) => {
       if (DEMO_MODE) {
         setWorkouts([...real, ...generateDemoWorkouts()]);
@@ -550,14 +557,14 @@ export default function FitnessTrackerPage() {
         if (lastEx && lastEx.sets.length > 0) {
           return {
             name: templateEx.name,
-            sets: lastEx.sets.map((s) => ({ reps: s.reps, weight: s.weight, confirmed: false })),
+            sets: lastEx.sets.map((s) => ({ reps: s.reps, weight: s.weight || 10, confirmed: false })),
           };
         }
         return {
           name: templateEx.name,
           sets: Array.from({ length: templateEx.sets }, () => ({
             reps: templateEx.reps,
-            weight: templateEx.weight,
+            weight: templateEx.weight || 10,
             confirmed: false,
           })),
         };
@@ -724,7 +731,7 @@ export default function FitnessTrackerPage() {
           onClick={() => {
             setExercises((prev) => [...prev, {
               name: 'New Exercise',
-              sets: [{ reps: 10, weight: 0, confirmed: false }, { reps: 10, weight: 0, confirmed: false }, { reps: 10, weight: 0, confirmed: false }],
+              sets: [{ reps: 10, weight: 10, confirmed: false }, { reps: 10, weight: 10, confirmed: false }, { reps: 10, weight: 10, confirmed: false }],
             }]);
             // Focus the name input after render
             setTimeout(() => {
@@ -827,6 +834,35 @@ export default function FitnessTrackerPage() {
         </div>
       </div>
 
+      {/* Body weight prompt */}
+      {!bodyWeight && (
+        <div className="bg-primary/10 border border-primary/30 px-4 py-3 mb-6 flex items-center gap-3">
+          <span className="text-xs text-primary font-bold">Set your body weight to enable scoring</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            placeholder="lbs"
+            value={bodyWeightInput}
+            onChange={(e) => setBodyWeightInput(e.target.value)}
+            className="w-20 bg-surface-container-lowest border border-outline text-xs px-2 py-1.5 text-on-surface font-mono focus:border-primary focus:outline-none"
+          />
+          <button
+            onClick={async () => {
+              if (!bodyWeightInput) return;
+              await fetch('/api/preferences', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 'fitness.body_weight': bodyWeightInput }),
+              });
+              setBodyWeight(bodyWeightInput);
+            }}
+            className="px-3 py-1.5 bg-primary text-on-primary text-xs font-bold"
+          >
+            Save
+          </button>
+        </div>
+      )}
+
       <Heatmap workouts={workouts} />
       <ScoreTimeline workouts={workouts} />
 
@@ -878,14 +914,17 @@ export default function FitnessTrackerPage() {
                   {w.notes && <p className="text-xs text-on-surface-variant/70 mt-0.5 italic">{w.notes}</p>}
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="text-right text-xs font-mono text-on-surface-variant">
-                    {w.type === 'weights' ? <span className="text-primary">weights</span> : <>{w.reps && <span>{w.reps} reps</span>}{w.duration_minutes && <span className={w.reps ? 'ml-2' : ''}>{Math.round(w.duration_minutes)} min</span>}{w.distance_miles && <span className="ml-2">{w.distance_miles} mi</span>}</>}
+                  <div className="text-right text-xs font-mono text-on-surface-variant flex items-center gap-2">
+                    {w.type === 'weights' ? <span>weights</span> : <>{w.reps && <span>{w.reps} reps</span>}{w.duration_minutes && <span className={w.reps ? 'ml-2' : ''}>{Math.round(w.duration_minutes)} min</span>}{w.distance_miles && <span className="ml-2">{w.distance_miles} mi</span>}</>}
+                    {w.score != null && (
+                      <span className="text-primary font-bold">{w.score.toFixed(1)}</span>
+                    )}
                   </div>
-                  {w.type !== 'weights' && (
+                  {(
                     <button
                       onClick={() => {
                         setEditingWorkout(w);
-                        setActivityInput(w.activity);
+                        setActivityInput(w.split_name ? `${w.split_name} Day` : w.activity);
                         setPageState('cardio');
                       }}
                       className="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-primary transition-all duration-75"
