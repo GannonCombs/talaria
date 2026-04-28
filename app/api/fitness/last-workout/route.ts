@@ -3,19 +3,27 @@ import { dbGet, dbAll } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   const splitId = request.nextUrl.searchParams.get('splitId');
-  if (!splitId) {
-    return NextResponse.json({ error: 'splitId required' }, { status: 400 });
+  const workoutId = request.nextUrl.searchParams.get('workoutId');
+
+  let targetId: number | null = null;
+
+  if (workoutId) {
+    // Load a specific workout by ID (for editing)
+    targetId = Number(workoutId);
+  } else if (splitId) {
+    // Find the most recent completed workout for this split
+    const workout = await dbGet<{ id: number }>(
+      `SELECT id FROM fitness_workouts
+       WHERE split_id = ? AND finished_at IS NOT NULL
+       ORDER BY date DESC, finished_at DESC LIMIT 1`,
+      splitId
+    );
+    targetId = workout?.id ?? null;
+  } else {
+    return NextResponse.json({ error: 'splitId or workoutId required' }, { status: 400 });
   }
 
-  // Find the most recent completed workout for this split
-  const workout = await dbGet<{ id: number }>(
-    `SELECT id FROM fitness_workouts
-     WHERE split_id = ? AND finished_at IS NOT NULL
-     ORDER BY date DESC, finished_at DESC LIMIT 1`,
-    splitId
-  );
-
-  if (!workout) {
+  if (!targetId) {
     return NextResponse.json({ exercises: null });
   }
 
@@ -26,7 +34,7 @@ export async function GET(request: NextRequest) {
     sort_order: number;
   }>(
     'SELECT id, exercise_name, sort_order FROM fitness_exercises WHERE workout_id = ? ORDER BY sort_order',
-    workout.id
+    targetId
   );
 
   const result = [];

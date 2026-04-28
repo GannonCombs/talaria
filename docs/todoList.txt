@@ -9,7 +9,7 @@ Allow different config (city, credit score, etc.)
 Scoring system. Wire up more datapoints.
 Find a better way to show Data in both panels (Top Matches and Personal Details going offscreen)
 Buy vs rent calculator
-Alerts/email? Maybe once I'm more seriously shopping.
+Alerts/email? Maybe once I'm more seriously shopping. (Start thinking about a broader Investment module that is AI-led)
 
 *Portfolio*
 

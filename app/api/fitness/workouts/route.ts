@@ -91,3 +91,22 @@ export async function PUT(request: NextRequest) {
   const row = await dbGet('SELECT * FROM fitness_workouts WHERE id = ?', id);
   return NextResponse.json(row);
 }
+
+export async function DELETE(request: NextRequest) {
+  const { id } = await request.json();
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  // Delete associated exercises and sets first
+  const exercises = await dbAll<{ id: number }>(
+    'SELECT id FROM fitness_exercises WHERE workout_id = ?', id
+  );
+  for (const ex of exercises) {
+    await dbRun('DELETE FROM fitness_sets WHERE exercise_id = ?', ex.id);
+  }
+  await dbRun('DELETE FROM fitness_exercises WHERE workout_id = ?', id);
+  await dbRun('DELETE FROM fitness_workouts WHERE id = ?', id);
+
+  return NextResponse.json({ ok: true });
+}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import BackButton from '@/components/layout/BackButton';
-import { Plus, Flag, RotateCcw, Dumbbell, Check, CalendarDays, TrendingUp, Pencil } from 'lucide-react';
+import { Plus, Flag, ArrowLeft, Dumbbell, Check, CalendarDays, TrendingUp, Pencil, Trash2 } from 'lucide-react';
 import { DEMO_MODE } from '@/lib/config';
 import SafeChart from '@/components/shared/SafeChart';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts';
@@ -39,7 +39,12 @@ function SetBubble({
   const startRef = useRef<{ x: number; y: number; weight: number; reps: number; moved: boolean }>({ x: 0, y: 0, weight: 0, reps: 0, moved: false });
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (set.confirmed) return;
+    if (set.confirmed) {
+      // Allow tap to unconfirm — track the pointer but don't start drag
+      e.preventDefault();
+      startRef.current = { x: e.clientX, y: e.clientY, weight: set.weight, reps: set.reps, moved: false };
+      return;
+    }
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     startRef.current = { x: e.clientX, y: e.clientY, weight: set.weight, reps: set.reps, moved: false };
@@ -91,9 +96,9 @@ function SetBubble({
       return;
     }
 
-    // If we didn't drag and didn't move much, it's a tap → confirm
+    // If we didn't drag and didn't move much, it's a tap → toggle confirm
     if (!startRef.current.moved) {
-      onConfirm();
+      onConfirm(); // toggles confirmed state
     }
     startRef.current.moved = false;
   };
@@ -499,6 +504,7 @@ export default function FitnessTrackerPage() {
   const [editReps, setEditReps] = useState('');
   const [saving, setSaving] = useState(false);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [workoutDate, setWorkoutDate] = useState<string>(new Date().toLocaleDateString('en-CA'));
   const [cardioStatus, setCardioStatus] = useState('');
   const [knownActivities, setKnownActivities] = useState<string[]>([]);
   const [activityInput, setActivityInput] = useState('');
@@ -540,6 +546,7 @@ export default function FitnessTrackerPage() {
       });
       const data = await res.json();
       setWorkoutId(data.workoutId);
+      setWorkoutDate(data.date);
       setActiveSplit(split);
       setStartedAt(data.startedAt);
 
@@ -580,7 +587,7 @@ export default function FitnessTrackerPage() {
   // ── Set operations ──
 
   const confirmSet = (exIdx: number, setIdx: number) => {
-    setExercises((prev) => { const next = [...prev]; const ex = { ...next[exIdx], sets: [...next[exIdx].sets] }; ex.sets[setIdx] = { ...ex.sets[setIdx], confirmed: true }; next[exIdx] = ex; return next; });
+    setExercises((prev) => { const next = [...prev]; const ex = { ...next[exIdx], sets: [...next[exIdx].sets] }; ex.sets[setIdx] = { ...ex.sets[setIdx], confirmed: !ex.sets[setIdx].confirmed }; next[exIdx] = ex; return next; });
   };
 
   const updateSetField = (exIdx: number, setIdx: number, field: 'weight' | 'reps', value: number) => {
@@ -668,11 +675,35 @@ export default function FitnessTrackerPage() {
     return (
       <>
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-xl font-bold text-on-surface">{activeSplit.name} Day</h1>
-            <p className="text-xs text-on-surface-variant font-mono mt-0.5">
-              {elapsed} min · {confirmedCount}/{totalCount} sets
-            </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setPageState('idle'); setWorkoutId(null); setActiveSplit(null); setExercises([]); }}
+              className="text-on-surface-variant hover:text-white"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-on-surface">{activeSplit.name} Day</h1>
+              <p className="text-xs text-on-surface-variant font-mono mt-0.5 flex items-center gap-2">
+                {elapsed} min · {confirmedCount}/{totalCount} sets ·
+                <input
+                  type="date"
+                  value={workoutDate}
+                  onChange={async (e) => {
+                    const newDate = e.target.value;
+                    setWorkoutDate(newDate);
+                    if (workoutId) {
+                      await fetch('/api/fitness/workouts', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: workoutId, date: newDate }),
+                      });
+                    }
+                  }}
+                  className="bg-transparent text-on-surface-variant font-mono text-xs focus:text-primary focus:outline-none cursor-pointer w-24"
+                />
+              </p>
+            </div>
           </div>
           <button onClick={finishWorkout} disabled={saving || confirmedCount === 0}
             className="flex items-center gap-1.5 bg-primary text-on-primary px-4 py-2.5 text-sm font-bold hover:brightness-110 disabled:opacity-40">
@@ -771,7 +802,7 @@ export default function FitnessTrackerPage() {
         <div className="mb-4">
           <div className="flex items-center gap-3">
             <button onClick={() => { setPageState('idle'); setActivityInput(''); setShowSuggestions(false); setEditingWorkout(null); }} className="text-on-surface-variant hover:text-white">
-              <RotateCcw size={20} />
+              <ArrowLeft size={20} />
             </button>
             <h1 className="text-2xl font-bold tracking-tight text-on-surface">{editingWorkout ? 'Edit Activity' : 'Log Activity'}</h1>
           </div>
@@ -920,18 +951,81 @@ export default function FitnessTrackerPage() {
                       <span className="text-primary font-bold">{w.score.toFixed(1)}</span>
                     )}
                   </div>
-                  {(
-                    <button
-                      onClick={() => {
+                  <button
+                    onClick={async () => {
+                      if (w.type === 'weights') {
+                        // Load exercises/sets from DB and open active workout view
+                        try {
+                          const res = await fetch(`/api/fitness/last-workout?workoutId=${w.id}`);
+                          const data = await res.json();
+                          const loadedExercises = data.exercises as Array<{ name: string; sets: Array<{ reps: number; weight: number }> }> | null;
+
+                          // Find the split template for default sets on exercises with no saved data
+                          const split = splits.find((s) => s.name === w.split_name);
+                          const templateExercises = split?.exercises ?? [];
+
+                          // Merge: saved exercises get confirmed sets, template-only exercises get unconfirmed defaults
+                          const merged: ActiveExercise[] = [];
+
+                          // First add all template exercises in order
+                          for (const tmpl of templateExercises) {
+                            const saved = loadedExercises?.find((ex) => ex.name === tmpl.name);
+                            if (saved && saved.sets.length > 0) {
+                              merged.push({
+                                name: saved.name,
+                                sets: saved.sets.map((s) => ({ reps: s.reps, weight: s.weight || 10, confirmed: true })),
+                              });
+                            } else {
+                              merged.push({
+                                name: tmpl.name,
+                                sets: Array.from({ length: tmpl.sets }, () => ({
+                                  reps: tmpl.reps, weight: tmpl.weight || 10, confirmed: false,
+                                })),
+                              });
+                            }
+                          }
+                          // Then add any saved exercises not in the template (added mid-workout)
+                          for (const ex of loadedExercises ?? []) {
+                            if (!templateExercises.some((t) => t.name === ex.name)) {
+                              merged.push({
+                                name: ex.name,
+                                sets: ex.sets.map((s) => ({ reps: s.reps, weight: s.weight || 10, confirmed: true })),
+                              });
+                            }
+                          }
+
+                          setExercises(merged);
+                        } catch { setExercises([]); }
+                        setWorkoutId(w.id);
+                        setWorkoutDate(w.date);
+                        const split = splits.find((s) => s.name === w.split_name);
+                        setActiveSplit(split ?? { id: w.id, name: w.split_name ?? 'Workout', muscle_groups: [], rotation_order: 0, exercises: [] });
+                        setStartedAt(null);
+                        setPageState('active');
+                      } else {
                         setEditingWorkout(w);
-                        setActivityInput(w.split_name ? `${w.split_name} Day` : w.activity);
+                        setActivityInput(w.activity);
                         setPageState('cardio');
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-primary transition-all duration-75"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  )}
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-primary transition-all duration-75"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Delete ${w.split_name ? `${w.split_name} Day` : w.activity} on ${w.date}?`)) return;
+                      const res = await fetch('/api/fitness/workouts', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: w.id }),
+                      });
+                      if (res.ok) setWorkouts((prev) => prev.filter((x) => x.id !== w.id));
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-on-surface-variant hover:text-error transition-all duration-75"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
             ))}
