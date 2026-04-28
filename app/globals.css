@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme inline {
+@theme {
   /* Surfaces */
   --color-background: #0d1117;
   --color-surface: #10141a;
@@ -63,3 +63,31 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #0d1117; }
 ::-webkit-scrollbar-thumb { background: #30363d; }
+
+/* Light theme scope — apply to a wrapper div to override dark colors locally */
+.theme-light {
+  --color-background: #ffffff;
+  --color-surface: #f8f9fa;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f1f3f5;
+  --color-surface-container: #e9ecef;
+  --color-surface-container-high: #dee2e6;
+  --color-surface-container-highest: #ced4da;
+  --color-surface-bright: #e2e6ea;
+  --color-primary: #00a67e;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #00d4aa;
+  --color-secondary: #2da44e;
+  --color-tertiary: #bf8700;
+  --color-tertiary-container: #fbab29;
+  --color-error: #d1242f;
+  --color-outline: #ced4da;
+  --color-outline-variant: #dee2e6;
+  --color-on-surface: #1a1a1a;
+  --color-on-surface-variant: #6c757d;
+  background-color: #ffffff;
+  color: #1a1a1a;
+  margin: -2rem;
+  padding: 2rem;
+  min-height: calc(100vh - 3.5rem);
+}

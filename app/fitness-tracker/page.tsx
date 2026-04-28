@@ -673,7 +673,7 @@ export default function FitnessTrackerPage() {
     const totalCount = exercises.reduce((s, ex) => s + ex.sets.length, 0);
 
     return (
-      <>
+      <div className="theme-light">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <button
@@ -779,7 +779,7 @@ export default function FitnessTrackerPage() {
         <p className="text-[10px] text-on-surface-variant text-center mt-4">
           Tap to confirm · Hold + drag to adjust · Double-tap for precise edit
         </p>
-      </>
+      </div>
     );
   }
 
@@ -798,7 +798,7 @@ export default function FitnessTrackerPage() {
       : allSuggestions;
 
     return (
-      <>
+      <div className="theme-light">
         <div className="mb-4">
           <div className="flex items-center gap-3">
             <button onClick={() => { setPageState('idle'); setActivityInput(''); setShowSuggestions(false); setEditingWorkout(null); }} className="text-on-surface-variant hover:text-white">
@@ -849,7 +849,7 @@ export default function FitnessTrackerPage() {
           <button type="submit" disabled={!activityInput.trim()} className="w-full bg-primary text-on-primary px-6 py-4 text-base font-bold disabled:opacity-40">{editingWorkout ? 'Update' : 'Save'}</button>
           {cardioStatus && <p className="text-center text-sm text-primary mt-3 font-mono">{cardioStatus}</p>}
         </form>
-      </>
+      </div>
     );
   }
 
@@ -857,7 +857,7 @@ export default function FitnessTrackerPage() {
   // IDLE — Split selection + history
   // ══════════════════════════════════════════════════════════════════
   return (
-    <>
+    <div className="theme-light">
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-1">
           <BackButton />
@@ -1032,6 +1032,6 @@ export default function FitnessTrackerPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
